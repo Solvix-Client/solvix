@@ -1,0 +1,74 @@
+{
+  "name": "solvix",
+  "version": "0.1.0",
+  "description": "Solvix — A universal, high-performance HTTP engine for modern JavaScript runtimes.",
+  "keywords": [
+    "http",
+    "fetch",
+    "request",
+    "client",
+    "typescript",
+    "node",
+    "browser",
+    "bun",
+    "deno",
+    "edge",
+    "universal",
+    "network",
+    "axios-alternative"
+  ],
+  "homepage": "https://github.com/Solvix-Client",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Solvix-Client/solvix"
+  },
+  "bugs": {
+    "url": "https://github.com/Solvix-Client/solvix/issues"
+  },
+  "license": "MIT",
+  "author": "Aditya",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "bench": "vitest bench",
+    "changeset": "changeset",
+    "release": "changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.8",
+    "@types/node": "^25.3.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.0",
+    "@typescript-eslint/parser": "^8.56.0",
+    "eslint": "^10.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "happy-dom": "^20.6.3",
+    "jsdom": "^28.1.0",
+    "prettier": "^3.8.1",
+    "tinybench": "^6.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
