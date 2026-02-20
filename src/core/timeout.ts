@@ -8,8 +8,10 @@ export const timeoutMiddleware: SolvixMiddleware =
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), timeout);
 
-        ctx.options.signal = controller.signal;
-
+        ctx.options.fetch = {
+            ...ctx.options.fetch,
+            signal: controller.signal
+        };
         try {
             await next();
         } finally {

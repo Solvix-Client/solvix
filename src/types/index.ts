@@ -1,7 +1,23 @@
-export interface SolvixOptions extends RequestInit {
+export interface RetryOptions {
+    retries: number;
+    factor?: number;      // exponential multiplier
+    minTimeout?: number;  // base delay
+    maxTimeout?: number;  // cap
+}
+
+export interface CacheOptions {
+  ttl: number;
+}
+
+export interface SolvixOptions {
+    baseURL?: string;
     timeout?: number;
-    retry?: number;
+    retry?: number | RetryOptions;
     parseJson?: boolean;
+    validateStatus?: (status: number) => boolean;
+    cache?: boolean | CacheOptions;
+    dedupe?: boolean;
+    fetch?: RequestInit;
 }
 
 export type SolvixRuntime =
