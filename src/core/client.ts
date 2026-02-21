@@ -41,6 +41,7 @@ import { buildProfile } from "../utils/profiler";
 import { runDevWarnings } from "../utils/devWarnings";
 import { SolvixBus } from "./bus";
 import { RequestGroup } from "./group";
+import { dependencyRegistry } from "./dependencyRegistry";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -139,6 +140,11 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         }
 
         const ctx = createContext<T>(resolvedUrl, mergedOptions);
+
+        // Register this request if it has id or is a dependency for another request
+        if (ctx.options.id) {
+            dependencyRegistry.create(ctx.options.id);
+        }
 
         let groupController: AbortController | undefined;
 
@@ -329,6 +335,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             ctx.options.group.markFailed();
                         }
 
+                        if (ctx.options.id) {
+                            dependencyRegistry.reject(ctx.options.id, solvixError);
+                        }
+
                         globalOptions.hooks?.onError?.(solvixError, ctx);
 
                         SolvixBus.emit({
@@ -435,6 +445,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 ctx.options.group.markComplete();
             }
 
+            if (ctx.options.id) {
+                dependencyRegistry.resolve(ctx.options.id, response);
+            }
+
             SolvixBus.emit({
                 type: "request:complete",
                 context: ctx,
@@ -443,6 +457,28 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
             return response;
         };
+
+        // Dependency wait (before scheduling)
+        if (ctx.options.dependsOn?.length) {
+            for (const depId of ctx.options.dependsOn) {
+
+                if (!dependencyRegistry.has(depId)) {
+                    throw new SolvixError({
+                        message: `Dependency not found: ${depId}`,
+                        isRetryable: false
+                    });
+                }
+
+                try {
+                    await dependencyRegistry.waitFor(depId);
+                } catch (error) {
+                    throw new SolvixError({
+                        message: `Dependency failed: ${depId}`,
+                        isRetryable: false
+                    });
+                }
+            }
+        }
 
         markTimeline(ctx, "queued");
 

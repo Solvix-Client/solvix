@@ -48,6 +48,11 @@ export type SolvixEventType =
     | "request:error"
     | "request:complete";
 
+export interface DependencyOptions {
+    id?: string;
+    dependsOn?: string[];
+}
+
 export interface RequestGroupOptions {
     id: string;
 }
@@ -193,6 +198,8 @@ export interface SolvixOptions {
     profiling?: ProfilingOptions;
     devMode?: boolean;
     group?: RequestGroup;
+    id?: string;
+    dependsOn?: string[];
 }
 
 export type SolvixRuntime =
