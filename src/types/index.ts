@@ -1,3 +1,5 @@
+import type { RequestGroup } from "../core/group";
+
 export type BodyType =
     | "json"
     | "form"
@@ -45,6 +47,19 @@ export type SolvixEventType =
     | "request:retry"
     | "request:error"
     | "request:complete";
+
+export interface RequestGroupOptions {
+    id: string;
+}
+
+export interface RequestGroupStats {
+    totalRequests: number;
+    completed: number;
+    failed: number;
+    startTime: number;
+    endTime?: number;
+    duration?: number;
+}
 
 export interface SolvixEvent {
     type: SolvixEventType;
@@ -177,6 +192,7 @@ export interface SolvixOptions {
     timeline?: TimelineOptions;
     profiling?: ProfilingOptions;
     devMode?: boolean;
+    group?: RequestGroup;
 }
 
 export type SolvixRuntime =

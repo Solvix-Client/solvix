@@ -40,6 +40,7 @@ import { getNetworkDuration } from "../utils/retryAnalytics";
 import { buildProfile } from "../utils/profiler";
 import { runDevWarnings } from "../utils/devWarnings";
 import { SolvixBus } from "./bus";
+import { RequestGroup } from "./group";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -138,6 +139,30 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         }
 
         const ctx = createContext<T>(resolvedUrl, mergedOptions);
+
+        let groupController: AbortController | undefined;
+
+        if (ctx.options.group instanceof RequestGroup) {
+
+            groupController = new AbortController();
+
+            const existingSignal =
+                ctx.options.fetch?.signal;
+
+            if (existingSignal) {
+                existingSignal.addEventListener("abort", () => {
+                    groupController?.abort();
+                });
+            }
+
+            ctx.options.fetch = {
+                ...ctx.options.fetch,
+                signal: groupController.signal
+            };
+
+            ctx.options.group.registerRequest(groupController);
+        }
+
         runDevWarnings(ctx);
         markTimeline(ctx, "created");
 
@@ -189,6 +214,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                     isRetryable: false
                 });
 
+                if (ctx.options.group instanceof RequestGroup) {
+                    ctx.options.group.markFailed();
+                }
+
                 SolvixBus.emit({
                     type: "request:error",
                     context: ctx,
@@ -209,6 +238,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         message: "Circuit breaker is OPEN",
                         isRetryable: false
                     });
+
+                    if (ctx.options.group instanceof RequestGroup) {
+                        ctx.options.group.markFailed();
+                    }
 
                     SolvixBus.emit({
                         type: "request:error",
@@ -284,14 +317,16 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                     const solvixError =
                         normalizeError(err, attempt);
 
-                    if (
-                        !solvixError.isRetryable ||
-                        attempt >= retryConfig.retries
-                    ) {
+                    if (!solvixError.isRetryable || attempt >= retryConfig.retries) {
+
                         markTimeline(ctx, "failed");
 
                         if (breaker) {
                             breaker.recordFailure(host);
+                        }
+
+                        if (ctx.options.group instanceof RequestGroup) {
+                            ctx.options.group.markFailed();
                         }
 
                         globalOptions.hooks?.onError?.(solvixError, ctx);
@@ -301,6 +336,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             context: ctx,
                             timestamp: Date.now()
                         });
+
                         throw solvixError;
                     }
 
@@ -394,6 +430,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
 
             globalOptions.hooks?.onRequestEnd?.(ctx);
+
+            if (ctx.options.group instanceof RequestGroup) {
+                ctx.options.group.markComplete();
+            }
 
             SolvixBus.emit({
                 type: "request:complete",
