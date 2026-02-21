@@ -42,17 +42,35 @@ export type TimelineStage =
     | "completed"
     | "failed"
     | "etagHit"
+    | "shadowStart"
+    | "shadowComplete"
+    | "shadowDifference"
+    | "shadowError"
 
 export type SolvixEventType =
     | "request:start"
     | "request:retry"
     | "request:error"
-    | "request:complete";
+    | "request:complete"
+    | "request:shadowStart"
+    | "request:shadowComplete"
+    | "request:shadowDifference"
+    | "request:shadowError";
+
+export interface ShadowOptions {
+    enabled?: boolean;
+    secondaryBaseURL: string;
+    compareResponse?: boolean;
+    onDifference?: (
+        primary: SolvixResponse<any>,
+        secondary: SolvixResponse<any>
+    ) => void;
+}
 
 export interface OfflineOptions {
     enabled?: boolean;
     maxQueueSize?: number;
-    persist?: boolean; 
+    persist?: boolean;
 }
 
 export interface ETagOptions {
@@ -227,6 +245,7 @@ export interface SolvixOptions {
     auth?: AuthOptions;
     etag?: ETagOptions;
     offline?: OfflineOptions;
+    shadow?: ShadowOptions;
 }
 
 export type SolvixRuntime =

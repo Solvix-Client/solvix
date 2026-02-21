@@ -1,3 +1,4 @@
+import { executeShadow } from "../core/shadowExecutor";
 import { setupOfflineListener } from "../core/offlineManager";
 import { offlineQueue } from "../store/offlineQueue";
 import { handleStream } from "../streaming/streamHandler";
@@ -601,6 +602,19 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 if (responseETag) {
                     setETag(fingerprint, responseETag);
                 }
+            }
+
+            // Advanced Shadow Mode (Non-blocking)
+            if (
+                ctx.options.shadow?.enabled &&
+                typeof window !== "undefined"
+            ) {
+                // Fire and forget
+                executeShadow(
+                    ctx,
+                    response,
+                    ctx.options.shadow
+                );
             }
 
             return response;
