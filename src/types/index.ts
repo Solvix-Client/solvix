@@ -40,13 +40,18 @@ export type TimelineStage =
     | "parseStart"
     | "parseEnd"
     | "completed"
-    | "failed";
+    | "failed"
+    | "etagHit"
 
 export type SolvixEventType =
     | "request:start"
     | "request:retry"
     | "request:error"
     | "request:complete";
+
+export interface ETagOptions {
+    enabled?: boolean;
+}
 
 export interface AuthOptions {
     refreshToken: () => Promise<string>;
@@ -214,6 +219,7 @@ export interface SolvixOptions {
     dependsOn?: string[];
     snapshot?: SnapshotOptions;
     auth?: AuthOptions;
+    etag?: ETagOptions;
 }
 
 export type SolvixRuntime =

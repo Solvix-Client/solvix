@@ -44,6 +44,7 @@ import { RequestGroup } from "./group";
 import { dependencyRegistry } from "./dependencyRegistry";
 import { buildSnapshot } from "../utils/snapshotBuilder";
 import { tokenOrchestrator } from "./tokenOrchestrator";
+import { getETag, setETag } from "../store/etagStore";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -323,7 +324,39 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                     }
 
                     markTimeline(ctx, "transportStart");
+
+                    // ETag Conditional Header
+                    if (
+                        ctx.options.etag?.enabled &&
+                        method === "GET"
+                    ) {
+                        const storedETag = getETag(fingerprint);
+
+                        if (storedETag) {
+                            const headers = new Headers(ctx.options.fetch?.headers);
+                            headers.set("If-None-Match", storedETag);
+
+                            ctx.options.fetch = {
+                                ...ctx.options.fetch,
+                                headers
+                            };
+                        }
+                    }
                     await run(ctx);
+
+                    // Handle 304 Not Modified
+                    if (
+                        ctx.options.etag?.enabled &&
+                        ctx.response?.status === 304
+                    ) {
+                        const cached = getCache(fingerprint);
+
+                        if (cached) {
+                            markTimeline(ctx, "etagHit");
+
+                            return cached as SolvixResponse<T>;
+                        }
+                    }
                     markTimeline(ctx, "responseReceived");
 
                     const validateStatus =
@@ -528,6 +561,18 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 context: ctx,
                 timestamp: Date.now()
             });
+
+            if (
+                ctx.options.etag?.enabled &&
+                method === "GET"
+            ) {
+                const responseETag =
+                    ctx.response!.headers.get("ETag");
+
+                if (responseETag) {
+                    setETag(fingerprint, responseETag);
+                }
+            }
 
             return response;
         };
