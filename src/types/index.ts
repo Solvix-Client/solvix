@@ -252,6 +252,7 @@ export interface SolvixOptions {
     offline?: OfflineOptions;
     shadow?: ShadowOptions;
     transport?: SolvixTransport;
+    params?: Record<string, any>;
 }
 
 export type SolvixRuntime =

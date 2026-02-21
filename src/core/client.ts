@@ -1,3 +1,4 @@
+import { buildQueryString } from "../utils/queryBuilder";
 import { executeShadow } from "../core/shadowExecutor";
 import { setupOfflineListener } from "../core/offlineManager";
 import { offlineQueue } from "../store/offlineQueue";
@@ -137,10 +138,18 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
         }
 
-        const resolvedUrl = resolveUrl(
+        let resolvedUrl = resolveUrl(
             url,
             mergedOptions.baseURL
         );
+
+        // Apply query params BEFORE fingerprinting
+        if (mergedOptions.params) {
+            resolvedUrl = buildQueryString(
+                resolvedUrl,
+                mergedOptions.params
+            );
+        }
 
         if (globalOptions.allowedOrigins) {
             const requestOrigin = new URL(resolvedUrl).origin;
