@@ -57,6 +57,11 @@ export type SolvixEventType =
     | "request:shadowDifference"
     | "request:shadowError";
 
+export type SolvixTransport = (
+    url: string,
+    init: RequestInit
+) => Promise<Response>;
+
 export interface ShadowOptions {
     enabled?: boolean;
     secondaryBaseURL: string;
@@ -246,6 +251,7 @@ export interface SolvixOptions {
     etag?: ETagOptions;
     offline?: OfflineOptions;
     shadow?: ShadowOptions;
+    transport?: SolvixTransport;
 }
 
 export type SolvixRuntime =

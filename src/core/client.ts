@@ -48,6 +48,7 @@ import { dependencyRegistry } from "./dependencyRegistry";
 import { buildSnapshot } from "../utils/snapshotBuilder";
 import { tokenOrchestrator } from "./tokenOrchestrator";
 import { getETag, setETag } from "../store/etagStore";
+import { defaultTransport } from "../core/defaultTransport";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -87,6 +88,9 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
     const run = compose(middlewares);
 
+    const transport =
+        globalOptions.transport ?? defaultTransport;
+
     if (
         typeof window !== "undefined" &&
         globalOptions.offline?.enabled
@@ -109,6 +113,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         const mergedOptions: SolvixOptions = {
             ...globalOptions,
             ...options,
+            transport: globalOptions.transport ?? defaultTransport,
             fetch: {
                 ...globalOptions.fetch,
                 ...options.fetch,
