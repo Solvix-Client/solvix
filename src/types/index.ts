@@ -40,6 +40,18 @@ export type TimelineStage =
     | "completed"
     | "failed";
 
+export type SolvixEventType =
+    | "request:start"
+    | "request:retry"
+    | "request:error"
+    | "request:complete";
+
+export interface SolvixEvent {
+    type: SolvixEventType;
+    context: SolvixContext<any>;
+    timestamp: number;
+}
+
 export interface TimelineEntry {
     stage: TimelineStage;
     timestamp: number;

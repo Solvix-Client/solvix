@@ -36,9 +36,10 @@ import {
 import { buildRequestBody } from "../core/bodyBuilder";
 import { parseResponse } from "../core/responseParser";
 import { markTimeline } from "../utils/timeline";
-import { getNetworkDuration } from "@utils/retryAnalytics";
+import { getNetworkDuration } from "../utils/retryAnalytics";
 import { buildProfile } from "../utils/profiler";
 import { runDevWarnings } from "../utils/devWarnings";
+import { SolvixBus } from "./bus";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -173,13 +174,28 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
             globalOptions.hooks?.onRequestStart?.(ctx);
 
+            SolvixBus.emit({
+                type: "request:start",
+                context: ctx,
+                timestamp: Date.now()
+            });
+
             const signal = ctx.options.fetch?.signal ?? undefined;
             if (signal?.aborted) {
                 markTimeline(ctx, "failed");
-                throw new SolvixError({
+
+                const error = new SolvixError({
                     message: "Request aborted",
                     isRetryable: false
                 });
+
+                SolvixBus.emit({
+                    type: "request:error",
+                    context: ctx,
+                    timestamp: Date.now()
+                });
+
+                throw error;
             }
 
             const host = new URL(ctx.url).host;
@@ -188,10 +204,19 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 markTimeline(ctx, "breakerCheck");
                 if (!breaker.canRequest(host)) {
                     markTimeline(ctx, "failed");
-                    throw new SolvixError({
+
+                    const error = new SolvixError({
                         message: "Circuit breaker is OPEN",
                         isRetryable: false
                     });
+
+                    SolvixBus.emit({
+                        type: "request:error",
+                        context: ctx,
+                        timestamp: Date.now()
+                    });
+
+                    throw error;
                 }
             }
 
@@ -270,6 +295,12 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         }
 
                         globalOptions.hooks?.onError?.(solvixError, ctx);
+
+                        SolvixBus.emit({
+                            type: "request:error",
+                            context: ctx,
+                            timestamp: Date.now()
+                        });
                         throw solvixError;
                     }
 
@@ -277,6 +308,12 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                     ctx.meta.retries = attempt;
 
                     globalOptions.hooks?.onRetry?.(ctx, attempt);
+
+                    SolvixBus.emit({
+                        type: "request:retry",
+                        context: ctx,
+                        timestamp: Date.now()
+                    });
 
                     const networkTime =
                         ctx.meta.timeline
@@ -358,14 +395,26 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
             globalOptions.hooks?.onRequestEnd?.(ctx);
 
+            SolvixBus.emit({
+                type: "request:complete",
+                context: ctx,
+                timestamp: Date.now()
+            });
+
             return response;
         };
 
         markTimeline(ctx, "queued");
-        const requestPromise = priorityQueue.add(task, priority)
-            .finally(() => {
-                markTimeline(ctx, "dequeued");
-            });
+
+        const wrappedTask = async () => {
+            markTimeline(ctx, "dequeued");
+            return task();
+        };
+
+        const requestPromise = priorityQueue.add(
+            wrappedTask,
+            priority
+        );
 
         if (ctx.options.dedupe) {
             setInflight(fingerprint, requestPromise);
