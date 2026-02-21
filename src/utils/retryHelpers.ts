@@ -60,6 +60,18 @@ export function normalizeError(
         err instanceof Error &&
         err.message.includes("fetch");
 
+    if (
+        typeof window !== "undefined" &&
+        err instanceof TypeError &&
+        err.message.includes("fetch")
+    ) {
+        return new SolvixError({
+            message:
+                "Network request failed (possible CORS issue or network block)",
+            isRetryable: false
+        });
+    }
+
     return new SolvixError({
         message:
             err instanceof Error
