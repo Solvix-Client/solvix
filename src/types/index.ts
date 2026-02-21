@@ -25,11 +25,66 @@ export type HttpMethod =
     | "HEAD"
     | "OPTIONS";
 
-export interface RetryOptions {
+export type TimelineStage =
+    | "created"
+    | "queued"
+    | "dequeued"
+    | "rateLimitWaitStart"
+    | "rateLimitWaitEnd"
+    | "breakerCheck"
+    | "transportStart"
+    | "firstByte"
+    | "responseReceived"
+    | "parseStart"
+    | "parseEnd"
+    | "completed"
+    | "failed";
+
+export interface TimelineEntry {
+    stage: TimelineStage;
+    timestamp: number;
+}
+
+export interface TimelineOptions {
+    enabled?: boolean;
+}
+
+export interface ProfileMetrics {
+    queueWaitTime?: number;
+    rateLimitWaitTime?: number;
+    networkTime?: number;
+    parseTime?: number;
+    totalTime: number;
     retries: number;
+}
+
+export interface ProfilingOptions {
+    enabled?: boolean;
+}
+
+export interface FingerprintOptions {
+    includeHeaders?: boolean;
+    includeBody?: boolean;
+    headerKeys?: string[];
+    customStrategy?: (
+        input: CanonicalRequest
+    ) => string;
+}
+
+export interface CanonicalRequest {
+    method: string;
+    url: string;
+    headers?: Record<string, string>;
+    bodyHash?: string;
+}
+
+export interface RetryOptions {
+    retries?: number;
     factor?: number;
     minTimeout?: number;
     maxTimeout?: number;
+    jitter?: boolean;
+    adaptive?: boolean;
 }
 
 export interface CacheOptions {
@@ -106,6 +161,10 @@ export interface SolvixOptions {
     method?: HttpMethod;
     allowedOrigins?: string[];
     avoidPreflight?: boolean;
+    fingerprint?: FingerprintOptions;
+    timeline?: TimelineOptions;
+    profiling?: ProfilingOptions;
+    devMode?: boolean;
 }
 
 export type SolvixRuntime =
@@ -116,19 +175,23 @@ export type SolvixRuntime =
     | "edge"
     | "unknown";
 
+export interface SolvixMeta {
+    startTime: number;
+    endTime?: number;
+    duration?: number;
+    attempt: number;
+    retries: number;
+    runtime: SolvixRuntime;
+    timeline?: TimelineEntry[];
+    profile?: ProfileMetrics;
+}
+
 export interface SolvixContext<T = unknown> {
     url: string;
     options: SolvixOptions;
     response?: Response;
     error?: unknown;
-    meta: {
-        startTime: number;
-        endTime?: number;
-        duration?: number;
-        attempt: number;
-        retries: number;
-        runtime: SolvixRuntime;
-    };
+    meta: SolvixMeta
 }
 
 export type SolvixMiddleware = <T>(

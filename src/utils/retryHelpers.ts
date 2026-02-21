@@ -3,47 +3,72 @@ import type { RetryOptions } from "../types";
 
 export function normalizeRetry(
     retry?: number | RetryOptions
-): RetryOptions {
-
-    if (!retry) {
-        return { retries: 0 };
-    }
+): Required<RetryOptions> {
 
     if (typeof retry === "number") {
         return {
-            retries: retry,
+            retries: Math.min(Math.max(retry, 0), 10),
             factor: 2,
-            minTimeout: 200
+            minTimeout: 100,
+            maxTimeout: 5000,
+            jitter: true,
+            adaptive: false
         };
     }
 
-    const config: RetryOptions = {
-        retries: retry.retries,
-        factor: retry.factor ?? 2,
-        minTimeout: retry.minTimeout ?? 200
+    return {
+        retries: Math.min(
+            Math.max(retry?.retries ?? 0, 0),
+            10
+        ),
+        factor: retry?.factor ?? 2,
+        minTimeout: retry?.minTimeout ?? 100,
+        maxTimeout: retry?.maxTimeout ?? 5000,
+        jitter: retry?.jitter ?? true,
+        adaptive: retry?.adaptive ?? false
     };
-
-    if (retry.maxTimeout !== undefined) {
-        config.maxTimeout = retry.maxTimeout;
-    }
-
-    return config;
 }
 
 export function computeBackoff(
     attempt: number,
-    config: RetryOptions
-) {
-    const base = config.minTimeout ?? 200;
-    const factor = config.factor ?? 2;
+    retry: Required<RetryOptions>,
+    response?: Response,
+    networkTime?: number
+): number {
 
-    let delay = base * Math.pow(factor, attempt - 1);
-
-    if (config.maxTimeout) {
-        delay = Math.min(delay, config.maxTimeout);
+    // Respect Retry-After header
+    if (response) {
+        const retryAfter = response.headers.get("retry-after");
+        if (retryAfter) {
+            const parsed = Number(retryAfter);
+            if (!isNaN(parsed)) {
+                return parsed * 1000;
+            }
+        }
     }
 
-    return delay;
+    // Base exponential backoff
+    let delay =
+        retry.minTimeout *
+        Math.pow(retry.factor, attempt);
+
+    // Adaptive network scaling
+    if (retry.adaptive && networkTime) {
+        delay += Math.min(networkTime * 0.5, 2000);
+    }
+
+    // Clamp to max
+    delay = Math.min(delay, retry.maxTimeout);
+
+    // Jitter
+    if (retry.jitter) {
+        const jitterAmount = delay * 0.3;
+        delay =
+            delay - jitterAmount +
+            Math.random() * jitterAmount;
+    }
+
+    return Math.max(delay, retry.minTimeout);
 }
 
 export function normalizeError(

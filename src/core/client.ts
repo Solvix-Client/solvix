@@ -33,9 +33,12 @@ import {
     setCache
 } from "../store/cache";
 
-import { safeParseResponse } from "../parsing/safeJson";
 import { buildRequestBody } from "../core/bodyBuilder";
 import { parseResponse } from "../core/responseParser";
+import { markTimeline } from "../utils/timeline";
+import { getNetworkDuration } from "@utils/retryAnalytics";
+import { buildProfile } from "../utils/profiler";
+import { runDevWarnings } from "../utils/devWarnings";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -87,7 +90,6 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 options.fetch?.method ??
                 "GET").toUpperCase();
 
-        // Merge options
         const mergedOptions: SolvixOptions = {
             ...globalOptions,
             ...options,
@@ -98,7 +100,6 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
         };
 
-        // Safe browser defaults
         if (typeof window !== "undefined") {
             if (!mergedOptions.fetch?.mode) {
                 mergedOptions.fetch = {
@@ -115,7 +116,6 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
         }
 
-        // Resolve URL
         const resolvedUrl = resolveUrl(
             url,
             mergedOptions.baseURL
@@ -136,19 +136,22 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
         }
 
-
         const ctx = createContext<T>(resolvedUrl, mergedOptions);
+        runDevWarnings(ctx);
+        markTimeline(ctx, "created");
 
         const priority = ctx.options.priority ?? DEFAULT_PRIORITY;
 
-        const fingerprint = generateFingerprint(
-            ctx.url,
-            ctx.options.fetch
-        );
+        const fingerprint =
+            await generateFingerprint(
+                ctx.options.fetch?.method ?? "GET",
+                ctx.url,
+                ctx.options.fetch,
+                ctx.options.fingerprint
+            );
 
         const method = ctx.options.fetch?.method ?? "GET";
 
-        // Deduplication (BEFORE scheduling)
         if (ctx.options.dedupe) {
             const existing = getInflight(fingerprint);
             if (existing) {
@@ -156,7 +159,6 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
         }
 
-        // Cache (BEFORE scheduling)
         if (
             method === "GET" &&
             ctx.options.cache
@@ -167,15 +169,13 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
         }
 
-        // Define actual execution task
         const task = async (): Promise<SolvixResponse<T>> => {
 
             globalOptions.hooks?.onRequestStart?.(ctx);
 
-            const signal =
-                ctx.options.fetch?.signal ?? undefined;
-
+            const signal = ctx.options.fetch?.signal ?? undefined;
             if (signal?.aborted) {
+                markTimeline(ctx, "failed");
                 throw new SolvixError({
                     message: "Request aborted",
                     isRetryable: false
@@ -184,9 +184,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
             const host = new URL(ctx.url).host;
 
-            // Circuit Breaker
             if (breaker) {
+                markTimeline(ctx, "breakerCheck");
                 if (!breaker.canRequest(host)) {
+                    markTimeline(ctx, "failed");
                     throw new SolvixError({
                         message: "Circuit breaker is OPEN",
                         isRetryable: false
@@ -194,12 +195,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 }
             }
 
-            // Rate Limiter
             if (limiter) {
-                const signal =
-                    ctx.options.fetch?.signal ?? undefined;
-
+                markTimeline(ctx, "rateLimitWaitStart");
                 await limiter.acquire(signal);
+                markTimeline(ctx, "rateLimitWaitEnd");
             }
 
             const retryConfig = normalizeRetry(ctx.options.retry);
@@ -229,7 +228,9 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         };
                     }
 
+                    markTimeline(ctx, "transportStart");
                     await run(ctx);
+                    markTimeline(ctx, "responseReceived");
 
                     const validateStatus =
                         ctx.options.validateStatus ??
@@ -262,13 +263,13 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         !solvixError.isRetryable ||
                         attempt >= retryConfig.retries
                     ) {
+                        markTimeline(ctx, "failed");
 
                         if (breaker) {
                             breaker.recordFailure(host);
                         }
 
                         globalOptions.hooks?.onError?.(solvixError, ctx);
-
                         throw solvixError;
                     }
 
@@ -277,19 +278,22 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
                     globalOptions.hooks?.onRetry?.(ctx, attempt);
 
+                    const networkTime =
+                        ctx.meta.timeline
+                            ? getNetworkDuration(ctx.meta.timeline)
+                            : undefined;
+
                     const delay = computeBackoff(
                         attempt,
-                        retryConfig
+                        retryConfig,
+                        ctx.response,
+                        networkTime
                     );
-
-                    const signal =
-                        ctx.options.fetch?.signal ?? undefined;
 
                     await sleep(delay, signal);
                 }
             }
 
-            // Streaming or Safe JSON
             let data;
 
             if (ctx.options.stream) {
@@ -302,16 +306,32 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                     })
                 });
             } else {
+                markTimeline(ctx, "parseStart");
                 data = await parseResponse(
                     ctx.response!,
                     ctx.options.responseType,
                     ctx.options.transformResponse
                 );
+                markTimeline(ctx, "parseEnd");
             }
 
             ctx.meta.endTime = Date.now();
             ctx.meta.duration =
                 ctx.meta.endTime - ctx.meta.startTime;
+
+            if (
+                ctx.options.profiling?.enabled &&
+                ctx.meta.timeline
+            ) {
+                ctx.meta.profile = buildProfile(
+                    ctx.meta.timeline,
+                    ctx.meta.retries,
+                    ctx.meta.startTime,
+                    ctx.meta.endTime
+                );
+            }
+
+            markTimeline(ctx, "completed");
 
             const response: SolvixResponse<T> = {
                 data: data as T,
@@ -320,7 +340,6 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 meta: ctx.meta
             };
 
-            // Cache store (after success)
             if (
                 method === "GET" &&
                 ctx.options.cache &&
@@ -333,7 +352,6 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 );
             }
 
-            // Breaker reset on success
             if (breaker) {
                 breaker.recordSuccess(host);
             }
@@ -343,16 +361,14 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             return response;
         };
 
-        // Execute via advanced PriorityQueue
-        const requestPromise = priorityQueue.add(
-            task,
-            priority
-        );
+        markTimeline(ctx, "queued");
+        const requestPromise = priorityQueue.add(task, priority)
+            .finally(() => {
+                markTimeline(ctx, "dequeued");
+            });
 
-        // Track inflight
         if (ctx.options.dedupe) {
             setInflight(fingerprint, requestPromise);
-
             requestPromise.finally(() => {
                 clearInflight(fingerprint);
             });
