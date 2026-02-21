@@ -49,6 +49,12 @@ export type SolvixEventType =
     | "request:error"
     | "request:complete";
 
+export interface OfflineOptions {
+    enabled?: boolean;
+    maxQueueSize?: number;
+    persist?: boolean; 
+}
+
 export interface ETagOptions {
     enabled?: boolean;
 }
@@ -220,6 +226,7 @@ export interface SolvixOptions {
     snapshot?: SnapshotOptions;
     auth?: AuthOptions;
     etag?: ETagOptions;
+    offline?: OfflineOptions;
 }
 
 export type SolvixRuntime =

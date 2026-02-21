@@ -1,3 +1,5 @@
+import { setupOfflineListener } from "../core/offlineManager";
+import { offlineQueue } from "../store/offlineQueue";
 import { handleStream } from "../streaming/streamHandler";
 import { PriorityQueue } from "../resilience/priorityQueue";
 import { RateLimiter } from "../resilience/rateLimiter";
@@ -84,6 +86,13 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
     const run = compose(middlewares);
 
+    if (
+        typeof window !== "undefined" &&
+        globalOptions.offline?.enabled
+    ) {
+        setupOfflineListener();
+    }
+
     async function request<T = unknown>(
         url: string,
         options: SolvixOptions = {}
@@ -143,6 +152,26 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         }
 
         const ctx = createContext<T>(resolvedUrl, mergedOptions);
+
+        // Offline Handling
+        if (
+            typeof window !== "undefined" &&
+            ctx.options.offline?.enabled &&
+            navigator.onLine === false
+        ) {
+            return new Promise((resolve, reject) => {
+
+                offlineQueue.enqueue(async () => {
+                    try {
+                        const result = await request<T>(url, options);
+                        resolve(result);
+                    } catch (err) {
+                        reject(err);
+                    }
+                });
+
+            });
+        }
 
         // Register this request if it has id or is a dependency for another request
         if (ctx.options.id) {
