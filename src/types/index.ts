@@ -48,6 +48,12 @@ export type SolvixEventType =
     | "request:error"
     | "request:complete";
 
+export interface AuthOptions {
+    refreshToken: () => Promise<string>;
+    shouldRefresh?: (error: any) => boolean;
+    attachToken?: (token: string, ctx: SolvixContext<any>) => void;
+}
+
 export interface SnapshotOptions {
     enabled?: boolean;
     includeHeaders?: boolean;
@@ -207,6 +213,7 @@ export interface SolvixOptions {
     id?: string;
     dependsOn?: string[];
     snapshot?: SnapshotOptions;
+    auth?: AuthOptions;
 }
 
 export type SolvixRuntime =

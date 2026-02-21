@@ -43,6 +43,7 @@ import { SolvixBus } from "./bus";
 import { RequestGroup } from "./group";
 import { dependencyRegistry } from "./dependencyRegistry";
 import { buildSnapshot } from "../utils/snapshotBuilder";
+import { tokenOrchestrator } from "./tokenOrchestrator";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -364,10 +365,35 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             ctx.options.group.markFailed();
                         }
 
+                        // Automatic Token Refresh (ONLY after retries exhausted)
+                        if (
+                            globalOptions.auth &&
+                            globalOptions.auth.shouldRefresh?.(solvixError)
+                        ) {
+                            try {
+                                const newToken =
+                                    await tokenOrchestrator.handleRefresh(
+                                        globalOptions.auth.refreshToken
+                                    );
+
+                                if (globalOptions.auth.attachToken) {
+                                    globalOptions.auth.attachToken(newToken, ctx);
+                                }
+
+                                // Replay original request
+                                return await request<T>(url, options);
+
+                            } catch (refreshError) {
+                                // If refresh fails, continue normal failure flow
+                            }
+                        }
+
+                        // Dependency rejection only if truly failing
                         if (ctx.options.id) {
                             dependencyRegistry.reject(ctx.options.id, solvixError);
                         }
 
+                        // Snapshot finalization
                         if (ctx.options.snapshot?.enabled) {
                             ctx.meta.endTime = Date.now();
                             ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
