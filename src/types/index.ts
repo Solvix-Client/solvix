@@ -48,6 +48,12 @@ export type SolvixEventType =
     | "request:error"
     | "request:complete";
 
+export interface SnapshotOptions {
+    enabled?: boolean;
+    includeHeaders?: boolean;
+    includeBody?: boolean;
+}
+
 export interface DependencyOptions {
     id?: string;
     dependsOn?: string[];
@@ -200,6 +206,7 @@ export interface SolvixOptions {
     group?: RequestGroup;
     id?: string;
     dependsOn?: string[];
+    snapshot?: SnapshotOptions;
 }
 
 export type SolvixRuntime =
@@ -210,6 +217,23 @@ export type SolvixRuntime =
     | "edge"
     | "unknown";
 
+export interface RequestSnapshot {
+    url: string;
+    method: string;
+    startTime: number;
+    endTime?: number;
+    duration?: number;
+    retries: number;
+    timeline?: any[];
+    profile?: any;
+    groupId?: string;
+    dependencyId?: string;
+    error?: {
+        message: string;
+        status?: number;
+    };
+}
+
 export interface SolvixMeta {
     startTime: number;
     endTime?: number;
@@ -219,6 +243,7 @@ export interface SolvixMeta {
     runtime: SolvixRuntime;
     timeline?: TimelineEntry[];
     profile?: ProfileMetrics;
+    snapshot?: RequestSnapshot;
 }
 
 export interface SolvixContext<T = unknown> {

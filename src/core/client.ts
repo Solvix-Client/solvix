@@ -42,6 +42,7 @@ import { runDevWarnings } from "../utils/devWarnings";
 import { SolvixBus } from "./bus";
 import { RequestGroup } from "./group";
 import { dependencyRegistry } from "./dependencyRegistry";
+import { buildSnapshot } from "../utils/snapshotBuilder";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -224,6 +225,20 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                     ctx.options.group.markFailed();
                 }
 
+                if (ctx.options.id) {
+                    dependencyRegistry.reject(ctx.options.id, error);
+                }
+
+                if (ctx.options.snapshot?.enabled) {
+                    ctx.meta.endTime = Date.now();
+                    ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
+
+                    ctx.meta.snapshot = {
+                        ...buildSnapshot(ctx),
+                        error: { message: error.message }
+                    };
+                }
+
                 SolvixBus.emit({
                     type: "request:error",
                     context: ctx,
@@ -247,6 +262,20 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
                     if (ctx.options.group instanceof RequestGroup) {
                         ctx.options.group.markFailed();
+                    }
+
+                    if (ctx.options.id) {
+                        dependencyRegistry.reject(ctx.options.id, error);
+                    }
+
+                    if (ctx.options.snapshot?.enabled) {
+                        ctx.meta.endTime = Date.now();
+                        ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
+
+                        ctx.meta.snapshot = {
+                            ...buildSnapshot(ctx),
+                            error: { message: error.message }
+                        };
                     }
 
                     SolvixBus.emit({
@@ -337,6 +366,21 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
                         if (ctx.options.id) {
                             dependencyRegistry.reject(ctx.options.id, solvixError);
+                        }
+
+                        if (ctx.options.snapshot?.enabled) {
+                            ctx.meta.endTime = Date.now();
+                            ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
+
+                            ctx.meta.snapshot = {
+                                ...buildSnapshot(ctx),
+                                error: {
+                                    message: solvixError.message,
+                                    ...(solvixError.status !== undefined && {
+                                        status: solvixError.status
+                                    })
+                                }
+                            };
                         }
 
                         globalOptions.hooks?.onError?.(solvixError, ctx);
@@ -449,6 +493,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 dependencyRegistry.resolve(ctx.options.id, response);
             }
 
+            if (ctx.options.snapshot?.enabled) {
+                ctx.meta.snapshot = buildSnapshot(ctx);
+            }
+
             SolvixBus.emit({
                 type: "request:complete",
                 context: ctx,
@@ -463,19 +511,43 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             for (const depId of ctx.options.dependsOn) {
 
                 if (!dependencyRegistry.has(depId)) {
-                    throw new SolvixError({
+                    const error = new SolvixError({
                         message: `Dependency not found: ${depId}`,
                         isRetryable: false
                     });
+
+                    if (ctx.options.snapshot?.enabled) {
+                        ctx.meta.endTime = Date.now();
+                        ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
+
+                        ctx.meta.snapshot = {
+                            ...buildSnapshot(ctx),
+                            error: { message: error.message }
+                        };
+                    }
+
+                    throw error;
                 }
 
                 try {
                     await dependencyRegistry.waitFor(depId);
-                } catch (error) {
-                    throw new SolvixError({
+                } catch {
+                    const error = new SolvixError({
                         message: `Dependency failed: ${depId}`,
                         isRetryable: false
                     });
+
+                    if (ctx.options.snapshot?.enabled) {
+                        ctx.meta.endTime = Date.now();
+                        ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
+
+                        ctx.meta.snapshot = {
+                            ...buildSnapshot(ctx),
+                            error: { message: error.message }
+                        };
+                    }
+
+                    throw error;
                 }
             }
         }
