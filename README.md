@@ -449,3 +449,36 @@ Solvix transforms API communication into a reliable, observable, secure, and orc
 It is not just a client.
 
 It is infrastructure.
+
+# ❤️ Support Solvix
+
+Solvix is an independent open-source infrastructure project.
+
+If Solvix helps your organization or production systems, consider supporting its long-term development.
+
+Your support helps:
+
+- Maintain enterprise-grade stability
+- Improve performance and security
+- Expand documentation and tooling
+- Build advanced observability integrations
+- Sustain long-term ecosystem growth
+
+## Sponsor via OpenCollective
+
+<p>
+  <a href="https://opencollective.com/solvix">
+    <img src="https://opencollective.com/solvix/tiers/backer.svg?avatarHeight=36" />
+  </a>
+</p>
+
+You can contribute as:
+
+- Individual supporter
+- Company sponsor
+- Infrastructure backer
+- Enterprise partner
+
+---
+
+Solvix is built for serious systems — and sustained by serious support.
