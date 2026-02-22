@@ -66,6 +66,24 @@ Solvix integrates them into a single cohesive orchestration engine.
 npm install solvix
 ```
 
+## pnpm
+
+```bash
+pnpm add solvix
+```
+
+## yarn
+
+```bash
+yarn add solvix
+```
+
+## bun
+
+```bash
+bun add solvix
+```
+
 ---
 
 # Quick Start
