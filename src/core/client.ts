@@ -93,9 +93,6 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
     const run = compose(middlewares);
 
-    const transport =
-        globalOptions.transport ?? defaultTransport;
-
     if (
         typeof window !== "undefined" &&
         globalOptions.offline?.enabled
