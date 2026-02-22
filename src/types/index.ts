@@ -57,6 +57,19 @@ export type SolvixEventType =
     | "request:shadowDifference"
     | "request:shadowError";
 
+export interface SolvixSecurityOptions {
+    enforceHTTPS?: boolean;
+    allowedDomains?: string[];
+    blockInsecureHeaders?: boolean;
+    maskSensitiveHeaders?: boolean;
+    redactSnapshot?: boolean;
+    strictMode?: boolean;
+    maxBodySize?: number;        // in bytes
+    maxResponseSize?: number;    // in bytes
+    allowedMethods?: HttpMethod[];
+    preventShadowTokenLeak?: boolean;
+}
+
 export type SolvixTransport = (
     url: string,
     init: RequestInit
@@ -253,6 +266,7 @@ export interface SolvixOptions {
     shadow?: ShadowOptions;
     transport?: SolvixTransport;
     params?: Record<string, any>;
+    security?: SolvixSecurityOptions;
 }
 
 export type SolvixRuntime =

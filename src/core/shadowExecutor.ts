@@ -1,5 +1,6 @@
 import type { SolvixContext, SolvixResponse } from "../types";
 import { SolvixBus } from "../core/bus";
+import { resolveSecurity } from "../security/resolveSecurity";
 
 export async function executeShadow<T>(
     originalCtx: SolvixContext<T>,
@@ -24,6 +25,8 @@ export async function executeShadow<T>(
             originalUrl.search;
 
         const originalFetch = originalCtx.options.fetch ?? {};
+
+        const security = resolveSecurity(originalCtx.options.security);
 
         // Build RequestInit safely (strict mode compatible)
         const shadowInit: RequestInit = {};
@@ -65,7 +68,29 @@ export async function executeShadow<T>(
         }
 
         if (originalFetch.headers !== undefined) {
-            shadowInit.headers = originalFetch.headers;
+
+            const originalHeaders = new Headers(originalFetch.headers);
+            const shadowHeaders = new Headers();
+
+            originalHeaders.forEach((value, key) => {
+
+                const lowerKey = key.toLowerCase();
+
+                const isSensitive =
+                    lowerKey === "authorization" ||
+                    lowerKey === "cookie" ||
+                    lowerKey === "set-cookie" ||
+                    lowerKey === "x-api-key" ||
+                    lowerKey === "proxy-authorization";
+
+                if (security.preventShadowTokenLeak && isSensitive) {
+                    return;
+                }
+
+                shadowHeaders.set(key, value);
+            });
+
+            shadowInit.headers = shadowHeaders;
         }
 
         // DO NOT reuse abort signal

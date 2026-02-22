@@ -1,3 +1,6 @@
+import { checkBodySize, checkResponseSize } from "../security/sizeGuard";
+import { redactSnapshotData } from "../security/redactor";
+import { resolveSecurity } from "../security/resolveSecurity";
 import { buildQueryString } from "../utils/queryBuilder";
 import { executeShadow } from "../core/shadowExecutor";
 import { setupOfflineListener } from "../core/offlineManager";
@@ -50,6 +53,7 @@ import { buildSnapshot } from "../utils/snapshotBuilder";
 import { tokenOrchestrator } from "./tokenOrchestrator";
 import { getETag, setETag } from "../store/etagStore";
 import { defaultTransport } from "../core/defaultTransport";
+import { sanitizeHeaders } from "../security/headerSanitizer";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -122,6 +126,8 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
         };
 
+        const security = resolveSecurity(mergedOptions.security);
+
         if (typeof window !== "undefined") {
             if (!mergedOptions.fetch?.mode) {
                 mergedOptions.fetch = {
@@ -142,6 +148,48 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             url,
             mergedOptions.baseURL
         );
+
+        // SECURITY — Allowed Methods Enforcement
+        if (security.allowedMethods.length > 0) {
+            if (!security.allowedMethods.includes(normalizedMethod as HttpMethod)) {
+                throw new SolvixError({
+                    message: `HTTP method not allowed: ${normalizedMethod}`,
+                    isRetryable: false
+                });
+            }
+        }
+
+        // SECURITY — HTTPS Enforcement
+        if (security.enforceHTTPS) {
+            const parsed = new URL(resolvedUrl);
+
+            const isLocalhost =
+                parsed.hostname === "localhost" ||
+                parsed.hostname === "127.0.0.1";
+
+            if (parsed.protocol !== "https:" && !isLocalhost) {
+                throw new SolvixError({
+                    message: `Insecure protocol blocked: ${parsed.protocol}`,
+                    isRetryable: false
+                });
+            }
+        }
+
+        // SECURITY — Domain Whitelisting
+        if (security.allowedDomains.length > 0) {
+            const parsed = new URL(resolvedUrl);
+
+            const isAllowed = security.allowedDomains.some(
+                domain => parsed.hostname === domain
+            );
+
+            if (!isAllowed) {
+                throw new SolvixError({
+                    message: `Domain not allowed: ${parsed.hostname}`,
+                    isRetryable: false
+                });
+            }
+        }
 
         // Apply query params BEFORE fingerprinting
         if (mergedOptions.params) {
@@ -283,6 +331,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         ...buildSnapshot(ctx),
                         error: { message: error.message }
                     };
+
+                    if (security.redactSnapshot) {
+                        redactSnapshotData(ctx);
+                    }
                 }
 
                 SolvixBus.emit({
@@ -322,6 +374,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             ...buildSnapshot(ctx),
                             error: { message: error.message }
                         };
+
+                        if (security.redactSnapshot) {
+                            redactSnapshotData(ctx);
+                        }
                     }
 
                     SolvixBus.emit({
@@ -352,12 +408,21 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             ctx.options.fetch?.headers
                         );
 
+                        // SECURITY - Header Sanitization & Injection Protection
+                        sanitizeHeaders(headers, security.blockInsecureHeaders);
+
                         const builtBody = await buildRequestBody(
                             ctx.options.body,
                             ctx.options.bodyType,
                             headers,
                             ctx.options.transformRequest,
                             ctx.options.avoidPreflight
+                        );
+
+                        // SECURITY — Body Size Guard
+                        checkBodySize(
+                            builtBody as BodyInit,
+                            security.maxBodySize
                         );
 
                         ctx.options.fetch = {
@@ -387,6 +452,12 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         }
                     }
                     await run(ctx);
+
+                    // SECURITY — Response Size Guard
+                    await checkResponseSize(
+                        ctx.response!,
+                        security.maxResponseSize
+                    );
 
                     // Handle 304 Not Modified
                     if (
@@ -484,6 +555,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                                     })
                                 }
                             };
+
+                            if (security.redactSnapshot) {
+                                redactSnapshotData(ctx);
+                            }
                         }
 
                         globalOptions.hooks?.onError?.(solvixError, ctx);
@@ -598,6 +673,9 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
             if (ctx.options.snapshot?.enabled) {
                 ctx.meta.snapshot = buildSnapshot(ctx);
+                if (security.redactSnapshot) {
+                    redactSnapshotData(ctx);
+                }
             }
 
             SolvixBus.emit({
@@ -652,6 +730,9 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             ...buildSnapshot(ctx),
                             error: { message: error.message }
                         };
+                        if (security.redactSnapshot) {
+                            redactSnapshotData(ctx);
+                        }
                     }
 
                     throw error;
@@ -673,6 +754,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             ...buildSnapshot(ctx),
                             error: { message: error.message }
                         };
+
+                        if (security.redactSnapshot) {
+                            redactSnapshotData(ctx);
+                        }
                     }
 
                     throw error;
