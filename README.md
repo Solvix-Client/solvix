@@ -5,7 +5,7 @@
 <h1 align="center">Solvix</h1>
 
 <p align="center">
-  Resilient API Infrastructure for Modern Applications
+  Resilient API Infrastructure for Modern Javascript Applications
 </p>
 
 <p align="center">
@@ -14,6 +14,15 @@
 
 <p align="center">
   Resilience • Security • Observability • Control
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/npm/v/solvix?style=flat&color=2563EB" alt="npm version" />
+  <img src="https://img.shields.io/npm/l/solvix?style=flat&color=14B8A6" alt="license" />
+  <img src="https://img.shields.io/npm/types/solvix?style=flat&color=9333EA" alt="typescript support" />
+  <img src="https://img.shields.io/node/v/solvix?style=flat&color=0EA5E9" alt="node version" />
+  <img src="https://img.shields.io/badge/security-enterprise--grade-DC2626?style=flat" alt="security" />
+  <img src="https://img.shields.io/badge/status-active%20development-16A34A?style=flat" alt="status" />
 </p>
 
 ---
