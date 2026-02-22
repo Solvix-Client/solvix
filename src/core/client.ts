@@ -469,6 +469,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         if (cached) {
                             markTimeline(ctx, "etagHit");
 
+                            if (breaker) {
+                                breaker.recordSuccess(host);
+                            }
+
                             return cached as SolvixResponse<T>;
                         }
                     }
