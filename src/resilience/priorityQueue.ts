@@ -3,17 +3,18 @@ type Task<T> = {
     task: () => Promise<T>;
     resolve: (value: T) => void;
     reject: (reason: any) => void;
+    createdAt: number;
 };
 
 export class PriorityQueue {
 
     private queue: Task<any>[] = [];
-    private activeCount = 0;
+    private activeCount: number = 0;
 
     constructor(
-        private concurrency: number,
-        private maxQueueSize: number,
-        private strategy: "fifo" | "drop-oldest" | "drop-lowest-priority" | "reject"
+        private readonly concurrency: number,
+        private readonly maxQueueSize: number,
+        private readonly strategy: "fifo" | "drop-oldest" | "drop-lowest-priority" | "reject"
     ) { }
 
     async add<T>(
@@ -23,45 +24,81 @@ export class PriorityQueue {
 
         return new Promise((resolve, reject) => {
 
-            if (this.queue.length >= this.maxQueueSize) {
+            const totalSize = this.queue.length + this.activeCount;
+
+            if (totalSize >= this.maxQueueSize) {
                 switch (this.strategy) {
+
                     case "drop-oldest":
                         this.queue.shift();
                         break;
 
                     case "drop-lowest-priority":
-                        this.queue.sort((a, b) => b.priority - a.priority);
-                        this.queue.shift();
+                        this.removeLowestPriority();
                         break;
 
                     case "reject":
+                    default:
                         reject(new Error("Queue overflow"));
                         return;
                 }
             }
 
-            this.queue.push({ task, priority, resolve, reject });
+            const item: Task<T> = {
+                task,
+                priority,
+                resolve,
+                reject,
+                createdAt: Date.now()
+            };
 
-            this.queue.sort((a, b) => a.priority - b.priority);
-
+            this.insertByPriority(item);
             this.process();
         });
     }
 
-    private process() {
-        if (this.activeCount >= this.concurrency) return;
+    private insertByPriority(task: Task<any>): void {
+        let i = this.queue.length - 1;
 
-        const item = this.queue.shift();
-        if (!item) return;
+        while (i >= 0 && this.queue[i]!.priority > task.priority) {
+            i--;
+        }
 
-        this.activeCount++;
-
-        item.task()
-            .then(item.resolve)
-            .catch(item.reject)
-            .finally(() => {
-                this.activeCount--;
-                this.process();
-            });
+        this.queue.splice(i + 1, 0, task);
     }
+
+    private removeLowestPriority(): void {
+        if (this.queue.length === 0) return;
+
+        let lowestIndex = 0;
+
+        for (let i = 1; i < this.queue.length; i++) {
+            if (this.queue[i]!.priority > this.queue[lowestIndex]!.priority) {
+                lowestIndex = i;
+            }
+        }
+
+        this.queue.splice(lowestIndex, 1);
+    }
+
+    // Arrow function locks "this"
+    private process = (): void => {
+        while (
+            this.activeCount < this.concurrency &&
+            this.queue.length > 0
+        ) {
+            const item = this.queue.shift();
+            if (!item) break;
+
+            this.activeCount++;
+
+            item.task()
+                .then(item.resolve)
+                .catch(item.reject)
+                .finally(() => {
+                    this.activeCount--;
+                    this.process();
+                });
+        }
+    };
 }
