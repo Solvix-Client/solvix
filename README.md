@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/Solvix-logo.png" width="120" alt="Solvix Logo" />
+  <img src="assets/solvix-png.png" width="120" alt="Solvix Logo" />
 </p>
 
 <h1 align="center">Solvix</h1>
