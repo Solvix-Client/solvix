@@ -516,7 +516,8 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         // Automatic Token Refresh (ONLY after retries exhausted)
                         if (
                             globalOptions.auth &&
-                            globalOptions.auth.shouldRefresh?.(solvixError)
+                            globalOptions.auth.shouldRefresh?.(solvixError) &&
+                            !ctx.options.__tokenRefreshAttempted
                         ) {
                             try {
                                 const newToken =
@@ -528,11 +529,16 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                                     globalOptions.auth.attachToken(newToken, ctx);
                                 }
 
-                                // Replay original request
-                                return await request<T>(url, options);
+                                // Mark refresh attempted to prevent recursion
+                                const replayOptions: SolvixOptions = {
+                                    ...options,
+                                    __tokenRefreshAttempted: true
+                                };
 
-                            } catch (refreshError) {
-                                // If refresh fails, continue normal failure flow
+                                return await request<T>(url, replayOptions);
+
+                            } catch {
+                                // Continue normal failure flow
                             }
                         }
 

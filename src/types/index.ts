@@ -267,6 +267,8 @@ export interface SolvixOptions {
     transport?: SolvixTransport;
     params?: Record<string, any>;
     security?: SolvixSecurityOptions;
+    /** @internal */
+    __tokenRefreshAttempted?: boolean;
 }
 
 export type SolvixRuntime =
