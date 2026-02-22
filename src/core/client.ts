@@ -602,6 +602,13 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         networkTime
                     );
 
+                    if (signal?.aborted) {
+                        throw new SolvixError({
+                            message: "Request aborted during retry delay",
+                            isRetryable: false
+                        });
+                    }
+
                     await sleep(delay, signal);
                 }
             }
