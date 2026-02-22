@@ -217,13 +217,19 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         if (
             typeof window !== "undefined" &&
             ctx.options.offline?.enabled &&
-            navigator.onLine === false
+            navigator.onLine === false &&
+            !ctx.options.__offlineReplay
         ) {
             return new Promise((resolve, reject) => {
 
                 offlineQueue.enqueue(async () => {
                     try {
-                        const result = await request<T>(url, options);
+                        const replayOptions: SolvixOptions = {
+                            ...options,
+                            __offlineReplay: true
+                        };
+
+                        const result = await request<T>(url, replayOptions);
                         resolve(result);
                     } catch (err) {
                         reject(err);
@@ -235,7 +241,10 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
         // Register this request if it has id or is a dependency for another request
         if (ctx.options.id) {
-            dependencyRegistry.create(ctx.options.id);
+            dependencyRegistry.create(
+                ctx.options.id,
+                ctx.options.dependsOn
+            );
         }
 
         let groupController: AbortController | undefined;

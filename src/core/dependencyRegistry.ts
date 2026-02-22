@@ -1,15 +1,48 @@
 type Deferred = {
+    resolve: (value: any) => void;
+    reject: (reason: any) => void;
     promise: Promise<any>;
-    resolve: (value?: any) => void;
-    reject: (reason?: any) => void;
+    dependsOn: string[];
 };
 
 class DependencyRegistry {
 
     private registry = new Map<string, Deferred>();
 
-    create(id: string) {
-        if (this.registry.has(id)) return;
+    private detectCircular(start: string, current: string): boolean {
+        if (start === current) return true;
+
+        const entry = this.registry.get(current);
+        if (!entry) return false;
+
+        if (entry.dependsOn.includes(start)) {
+            return true;
+        }
+
+        return entry.dependsOn.some(dep =>
+            this.detectCircular(start, dep)
+        );
+    }
+
+    create(id: string, dependsOn?: string[]) {
+        if (!id) {
+            throw new Error("Dependency id is required");
+        }
+
+        if (this.registry.has(id)) {
+            throw new Error(`Duplicate dependency id: ${id}`);
+        }
+
+        // Proper circular detection BEFORE insertion
+        if (dependsOn?.length) {
+            for (const dep of dependsOn) {
+                if (this.detectCircular(id, dep)) {
+                    throw new Error(
+                        `Circular dependency detected: ${id} ↔ ${dep}`
+                    );
+                }
+            }
+        }
 
         let resolve!: (value?: any) => void;
         let reject!: (reason?: any) => void;
@@ -19,7 +52,12 @@ class DependencyRegistry {
             reject = rej;
         });
 
-        this.registry.set(id, { promise, resolve, reject });
+        this.registry.set(id, {
+            promise,
+            resolve,
+            reject,
+            dependsOn: dependsOn ?? []
+        });
     }
 
     resolve(id: string, value?: any) {

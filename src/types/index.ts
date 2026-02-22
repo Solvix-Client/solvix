@@ -269,6 +269,8 @@ export interface SolvixOptions {
     security?: SolvixSecurityOptions;
     /** @internal */
     __tokenRefreshAttempted?: boolean;
+    /** @internal */
+    __offlineReplay?: boolean;
 }
 
 export type SolvixRuntime =
