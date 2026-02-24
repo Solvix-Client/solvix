@@ -54,7 +54,13 @@
     "test:coverage": "vitest run --coverage",
     "bench": "tsx bench/tokenRefreshStampede.bench.ts",
     "changeset": "changeset",
-    "release": "changeset publish"
+    "release": "changeset publish",
+    "size": "gzip -c dist/index.js | wc -c",
+    "prepublishOnly": "npm run build && npm run typecheck",
+    "release:beta": "npm version prerelease --preid=beta",
+    "release:patch": "npm version patch",
+    "release:minor": "npm version minor",
+    "release:major": "npm version major"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
