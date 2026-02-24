@@ -1,6 +1,6 @@
 {
   "name": "solvix",
-  "version": "0.1.0",
+  "version": "0.1.1-beta.0",
   "description": "Solvix — A universal, high-performance HTTP engine for modern JavaScript runtimes.",
   "keywords": [
     "http",
