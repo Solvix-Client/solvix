@@ -7,5 +7,10 @@ export default defineConfig({
     sourcemap: true,
     clean: true,
     minify: true,
+    treeshake: true,
     target: "es2022",
+
+    esbuildOptions(options) {
+        options.metafile = true;
+    },
 });

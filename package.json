@@ -52,7 +52,7 @@
     "format": "prettier --write .",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
-    "bench": "vitest bench",
+    "bench": "tsx bench/tokenRefreshStampede.bench.ts",
     "changeset": "changeset",
     "release": "changeset publish"
   },
@@ -61,6 +61,7 @@
     "@types/node": "^25.3.0",
     "@typescript-eslint/eslint-plugin": "^8.56.0",
     "@typescript-eslint/parser": "^8.56.0",
+    "axios": "^1.13.5",
     "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
     "happy-dom": "^20.6.3",
@@ -68,6 +69,7 @@
     "prettier": "^3.8.1",
     "tinybench": "^6.0.0",
     "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }

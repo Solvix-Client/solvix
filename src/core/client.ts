@@ -115,7 +115,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         const mergedOptions: SolvixOptions = {
             ...globalOptions,
             ...options,
-            transport: globalOptions.transport ?? defaultTransport,
+            transport: options.transport ?? globalOptions.transport ?? defaultTransport,
             fetch: {
                 ...globalOptions.fetch,
                 ...options.fetch,
