@@ -25,19 +25,6 @@
   <img src="https://img.shields.io/badge/status-active%20development-16A34A?style=flat" alt="status" />
 </p>
 
-<p align="center">
-
-<img src="https://img.shields.io/badge/Performance-~Equal%20to%20Fetch%20%26%20Axios-brightgreen" />
-<img src="https://img.shields.io/badge/Bundle%20Size-7.8KB%20gzip-blue" />
-<img src="https://img.shields.io/badge/Memory-Stable-success" />
-<img src="https://img.shields.io/badge/Dedupe-Stampede%20Protected-purple" />
-<img src="https://img.shields.io/badge/Token%20Refresh-Stampede%20Safe-orange" />
-<img src="https://img.shields.io/badge/Retry%20Engine-Production%20Ready-9cf" />
-<img src="https://img.shields.io/badge/Concurrency-Tested%201000%2B%20Requests-brightgreen" />
-<img src="https://img.shields.io/badge/Runtime-Node%20%7C%20Browser%20%7C%20Edge-black" />
-
-</p>
-
 ---
 
 Solvix is a powerful HTTP orchestration layer designed for modern applications and enterprise systems.
