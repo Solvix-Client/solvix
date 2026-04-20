@@ -1,12 +1,14 @@
 import type { SolvixMiddleware } from "../types";
+import { normalizeRetry } from "../utils/retryHelpers";
 
 export const retryMiddleware: SolvixMiddleware =
     async (ctx, next) => {
-        const retry = ctx.options.retry ?? 0;
+        const normalizedRetry = normalizeRetry(ctx.options.retry);
+        const maxRetries = normalizedRetry.retries;
 
         let attempt = 0;
 
-        while (attempt <= retry) {
+        while (attempt <= maxRetries) {
             try {
                 ctx.meta.attempt = attempt;
 
@@ -21,7 +23,7 @@ export const retryMiddleware: SolvixMiddleware =
                 attempt++;
                 ctx.meta.retries = attempt;
 
-                if (attempt > retry) {
+                if (attempt > maxRetries) {
                     ctx.error = err;
                     throw err;
                 }
