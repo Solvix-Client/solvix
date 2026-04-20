@@ -1,5 +1,5 @@
 {
-  "name": "solvix",
+  "name": "@paditya/solvix",
   "version": "1.0.0-beta.1",
   "description": "Solvix — A universal, high-performance HTTP engine for modern JavaScript runtimes.",
   "keywords": [
