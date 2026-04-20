@@ -17,10 +17,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/npm/v/solvix?style=flat&color=2563EB" alt="npm version" />
-  <img src="https://img.shields.io/npm/l/solvix?style=flat&color=14B8A6" alt="license" />
-  <img src="https://img.shields.io/npm/types/solvix?style=flat&color=9333EA" alt="typescript support" />
-  <img src="https://img.shields.io/node/v/solvix?style=flat&color=0EA5E9" alt="node version" />
+  <img src="https://img.shields.io/npm/v/@adityadev13/solvix?style=flat&color=2563EB" alt="npm version" />
+  <img src="https://img.shields.io/npm/l/@adityadev13/solvix?style=flat&color=14B8A6" alt="license" />
+  <img src="https://img.shields.io/npm/types/@adityadev13/solvix?style=flat&color=9333EA" alt="typescript support" />
+  <img src="https://img.shields.io/badge/node-%3E%3D18.0.0-0EA5E9?style=flat" alt="node version" />
   <img src="https://img.shields.io/badge/security-enterprise--grade-DC2626?style=flat" alt="security" />
   <img src="https://img.shields.io/badge/status-active%20development-16A34A?style=flat" alt="status" />
 </p>
