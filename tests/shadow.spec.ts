@@ -28,7 +28,7 @@ describe("Shadow Mode", () => {
         });
 
         expect(res.status).toBe(200);
-        expect(res.data.source).toBe(1); // Primary must be first call
+        expect((res.data as any).source).toBe(1); // Primary must be first call
     });
 
     it("should not delay primary response", async () => {
@@ -87,7 +87,7 @@ describe("Shadow Mode", () => {
             }
         });
 
-        expect(res.data.primary).toBe(true);
+        expect((res.data as any).primary).toBe(true);
     });
 
     it("should detect response differences", async () => {
@@ -123,7 +123,7 @@ describe("Shadow Mode", () => {
 
         // Verify primary request was made and response is correct
         expect(res.status).toBe(200);
-        expect(res.data.value).toBe(1);
+        expect((res.data as any).value).toBe(1);
         expect(fetchMock).toHaveBeenCalled();
     });
 
