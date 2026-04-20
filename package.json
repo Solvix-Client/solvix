@@ -1,5 +1,5 @@
 {
-  "name": "@paditya/solvix",
+  "name": "@adityadev13/solvix",
   "version": "1.0.0-beta.1",
   "description": "Solvix — A universal, high-performance HTTP engine for modern JavaScript runtimes.",
   "keywords": [
@@ -20,7 +20,7 @@
   "homepage": "https://solvix-client.github.io/solvix-docs/",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Solvix-Client/solvix"
+    "url": "git+https://github.com/Solvix-Client/solvix.git"
   },
   "bugs": {
     "url": "https://github.com/Solvix-Client/solvix/issues"
