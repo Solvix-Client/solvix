@@ -51,7 +51,12 @@ import { RequestGroup } from "./group";
 import { dependencyRegistry } from "./dependencyRegistry";
 import { buildSnapshot } from "../utils/snapshotBuilder";
 import { tokenOrchestrator } from "./tokenOrchestrator";
-import { getETag, setETag } from "../store/etagStore";
+import {
+    getETag,
+    getETagResponse,
+    setETag,
+    setETagResponse
+} from "../store/etagStore";
 import { defaultTransport } from "../core/defaultTransport";
 import { sanitizeHeaders } from "../security/headerSanitizer";
 
@@ -470,7 +475,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         ctx.options.etag?.enabled &&
                         ctx.response?.status === 304
                     ) {
-                        const cached = getCache(fingerprint);
+                        const cached = getETagResponse(fingerprint);
 
                         if (cached) {
                             markTimeline(ctx, "etagHit");
@@ -716,6 +721,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
                 if (responseETag) {
                     setETag(fingerprint, responseETag);
+                    setETagResponse(fingerprint, response);
                 }
             }
 

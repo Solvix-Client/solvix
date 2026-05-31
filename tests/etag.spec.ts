@@ -3,7 +3,7 @@ import { createClient } from "../src";
 
 describe("ETag handling", () => {
 
-    it("should cache and reuse 304 response", async () => {
+    it("should return cached response when the server replies 304", async () => {
 
         let first = true;
 
@@ -20,21 +20,31 @@ describe("ETag handling", () => {
             return {
                 status: 304,
                 headers: new Headers(),
-                json: async () => ({ id: 1 }),
+                json: async () => {
+                    throw new Error("304 body should not be parsed");
+                },
                 clone() { return this; }
             };
         });
 
         const client = createClient({
             baseURL: "https://api.example.com",
-            etag: { enabled: true },
-            validateStatus: (status) => (status >= 200 && status < 300) || status === 304
+            etag: { enabled: true }
         });
 
         const r1 = await client.get("/etag");
         const r2 = await client.get("/etag");
 
+        expect(r1.status).toBe(200);
+        expect(r2.status).toBe(200);
         expect((r2.data as { id: number }).id).toBe(1);
+
+        const calls = vi.mocked(global.fetch).mock.calls;
+        expect(calls).toHaveLength(2);
+
+        const headers = new Headers(calls[1]?.[1]?.headers);
+
+        expect(headers.get("If-None-Match")).toBe("123");
     });
 
 });
