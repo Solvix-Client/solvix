@@ -321,13 +321,30 @@ export interface SolvixLogger {
     error: (msg: string, meta?: Record<string, unknown>) => void;
 }
 
+/**
+ * Lifecycle hooks. Fired at various stages of the request pipeline.
+ * All hooks are optional.
+ */
 export interface SolvixHooks {
+    /** Called when a request starts processing. */
     onRequestStart?: (ctx: any) => void;
+    /** Called after a request completes successfully. */
     onRequestEnd?: (ctx: any) => void;
+    /** Called before retrying a failed request. */
     onRetry?: (ctx: any, attempt: number) => void;
+    /** Called when a request fails permanently. */
     onError?: (error: unknown, ctx: any) => void;
+    /** Called when the circuit breaker opens for a host. */
     onCircuitOpen?: (host: string) => void;
+    /**
+     * Called periodically during upload with progress info.
+     * @see {@link ProgressPayload}
+     */
     onUploadProgress?: (progress: ProgressPayload) => void;
+    /**
+     * Called periodically during download with progress info.
+     * @see {@link ProgressPayload}
+     */
     onDownloadProgress?: (progress: ProgressPayload) => void;
 }
 
@@ -337,46 +354,124 @@ export interface StreamOptions {
     parseJsonLines?: boolean;
 }
 
+/**
+ * All options accepted by `createClient()` and per-request.
+ *
+ * Global options are set in `createClient({...})` and can be
+ * overridden per-request by passing them to `client.get(...)` etc.
+ *
+ * Every field is optional. Features are opt-in — nothing is enabled
+ * by default except basic HTTP functionality and security guards.
+ */
 export interface SolvixOptions {
+    /** Base URL prepended to all relative request URLs. */
     baseURL?: string;
+    /** Request timeout in milliseconds. Uses AbortController internally. */
     timeout?: number;
+    /**
+     * Retry configuration. Set to a number for max retries, or an object for full control.
+     * @default { retries: 0 }
+     */
     retry?: number | RetryOptions;
+    /** @deprecated Use hooks or responseType instead. */
     parseJson?: boolean;
+    /**
+     * Custom status validation function.
+     * Return `true` to accept the status, `false` or throw to reject.
+     * @default (status) => status >= 200 && status < 300
+     */
     validateStatus?: (status: number) => boolean;
+    /** Enable in-memory response caching for GET requests. Pass `{ ttl }` for custom TTL. */
     cache?: boolean | CacheOptions;
+    /** Deduplicate in-flight requests — only one network call for identical requests. */
     dedupe?: boolean;
+    /**
+     * Raw fetch options (`credentials`, `mode`, `redirect`, etc.).
+     * These are merged with the internal fetch config.
+     */
     fetch?: RequestInit;
+    /** Circuit breaker configuration for per-host failure protection. */
     circuitBreaker?: CircuitBreakerOptions;
+    /** Token bucket rate limiter for client-side throttling. */
     rateLimit?: RateLimitOptions;
+    /** Queue priority (lower number = higher priority). Default: 5. */
     priority?: number;
+    /** Queue behavior (max size, drop strategy). */
     queue?: QueueOptions;
+    /** Maximum number of concurrent requests. Default: Infinity. */
     maxConcurrency?: number;
+    /** Lifecycle hooks (onRequestStart, onRetry, onError, etc.). */
     hooks?: SolvixHooks;
+    /**
+     * Enable response streaming as an async iterable.
+     * @see {@link StreamOptions}
+     */
     stream?: boolean;
+    /** Parse Server-Sent Events (SSE) from the response stream. */
     sse?: boolean;
+    /** Parse newline-delimited JSON (NDJSON) from the response stream. */
     parseJsonLines?: boolean;
+    /** Request body. Serialized according to `bodyType`. */
     body?: unknown;
+    /**
+     * How to serialize the request body.
+     * @default "json"
+     */
     bodyType?: BodyType;
+    /**
+     * How to deserialize the response body.
+     * @default "json"
+     */
     responseType?: ResponseType;
+    /**
+     * Transform the request body and headers before sending.
+     * Receives `(body, headers)`, should return the transformed body.
+     */
     transformRequest?: (body: unknown, headers: Headers) => Promise<any> | any;
+    /**
+     * Transform the raw Response object after receiving it.
+     * Receives the `Response`, should return the parsed data.
+     */
     transformResponse?: (response: Response) => Promise<any>;
+    /** HTTP method override. Default is determined by the method helper. */
     method?: HttpMethod;
+    /** Allowed cross-origin destinations for CORS requests. */
     allowedOrigins?: string[];
+    /** Avoid triggering CORS preflight by keeping requests simple. */
     avoidPreflight?: boolean;
+    /** Fine-tune cache/dedup key fingerprinting. */
     fingerprint?: FingerprintOptions;
+    /** Enable request timeline tracking (stages with timestamps). */
     timeline?: TimelineOptions;
+    /** Enable performance profiling (builds ProfileMetrics from timeline). */
     profiling?: ProfilingOptions;
+    /** Enable development-mode warnings for common misconfigurations. */
     devMode?: boolean;
+    /** Attach this request to a RequestGroup for batch abort. */
     group?: RequestGroup;
+    /** Unique ID for this request (used in dependency chains). */
     id?: string;
+    /** IDs of requests this request depends on (waits for them to complete). */
     dependsOn?: string[];
+    /** Capture a detailed snapshot of the request (for debugging). */
     snapshot?: SnapshotOptions;
+    /** Token refresh configuration for automatic 401 handling. */
     auth?: AuthOptions;
+    /** Conditional GET support via ETag headers. */
     etag?: ETagOptions;
+    /** Offline request queuing (browser only). */
     offline?: OfflineOptions;
+    /** Fire-and-forget shadow requests to a secondary endpoint. */
     shadow?: ShadowOptions;
+    /**
+     * Custom transport function.
+     * Overrides the default `fetch` for this request.
+     * @see {@link SolvixTransport}
+     */
     transport?: SolvixTransport;
+    /** URL query parameters (merged into the request URL). */
     params?: Record<string, any>;
+    /** Security policies (HTTPS enforcement, domain whitelisting, etc.). */
     security?: SolvixSecurityOptions;
     /** Response schema validation callback. Return the validated data or throw.
      *  Users can pass Zod's `.parse()`, Valibot's `safeParse`, or a custom fn. */
@@ -452,11 +547,24 @@ export interface SolvixMeta {
     spanId?: string;
 }
 
+/**
+ * The request context passed through the middleware pipeline.
+ *
+ * Middleware can read and modify `url`, `options`, and `response`.
+ * All fields are mutable — changes propagate to subsequent middleware.
+ *
+ * @typeParam T - The expected response data type.
+ */
 export interface SolvixContext<T = unknown> {
+    /** The resolved request URL. */
     url: string;
+    /** Merged options (global + per-request). */
     options: SolvixOptions;
+    /** The Response object, set by the transport middleware. */
     response?: Response;
+    /** The error, if the request failed. */
     error?: unknown;
+    /** Metadata: timestamps, attempt count, timeline, profiling, etc. */
     meta: SolvixMeta
 }
 

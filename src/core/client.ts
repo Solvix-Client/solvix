@@ -63,6 +63,25 @@ import { defaultTransport } from "../core/defaultTransport";
 import { sanitizeRawHeaders } from "../security/headerSanitizer";
 import { trackDownloadProgress, trackUploadProgress } from "./progressReport";
 
+/**
+ * Create a Solvix HTTP client instance.
+ *
+ * @example
+ * ```ts
+ * const client = createClient({
+ *   baseURL: "https://api.example.com",
+ *   timeout: 5000,
+ *   retry: { retries: 3 },
+ *   logger: console
+ * });
+ *
+ * const res = await client.get("/users");
+ * console.log(res.data);
+ * ```
+ *
+ * All options are optional. Features are opt-in — nothing is enabled by default
+ * except basic HTTP functionality and security guards (CRLF protection, etc.).
+ */
 export function createClient(globalOptions: SolvixOptions = {}) {
 
     const priorityQueue = new PriorityQueue(
@@ -152,6 +171,17 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         setupOfflineListener();
     }
 
+    /**
+     * Execute an HTTP request through the full Solvix pipeline:
+     * security checks → query params → fingerprinting → dedup check → cache check →
+     * queue → middleware (timeout → transport) → response parsing → validation → caching → events.
+     *
+     * Prefer the typed convenience methods (`get`, `post`, etc.) for most use cases.
+     *
+     * @param url - Relative or absolute URL (relative resolves against baseURL).
+     * @param options - Per-request options that override global options.
+     * @returns A promise that resolves to a SolvixResponse with parsed `data`.
+     */
     async function request<T = unknown>(
         url: string,
         options: SolvixOptions = {}
@@ -990,21 +1020,57 @@ export function createClient(globalOptions: SolvixOptions = {}) {
     }
 
     return {
+        /**
+         * Make an HTTP request with full control over method, headers, body, and all options.
+         * Prefer the typed convenience methods (`get`, `post`, etc.) for most use cases.
+         *
+         * @param url - Relative or absolute URL (relative resolves against baseURL).
+         * @param options - Per-request options that override global options.
+         * @returns A promise that resolves to a SolvixResponse with parsed data.
+         */
         request,
+        /** HTTP GET request. @see {@link request} for options. */
         get: methodFactory("GET"),
+        /** HTTP POST request. @see {@link request} for options. */
         post: methodFactory("POST"),
+        /** HTTP PUT request. @see {@link request} for options. */
         put: methodFactory("PUT"),
+        /** HTTP PATCH request. @see {@link request} for options. */
         patch: methodFactory("PATCH"),
+        /** HTTP DELETE request. @see {@link request} for options. */
         delete: methodFactory("DELETE"),
+        /** HTTP HEAD request. @see {@link request} for options. */
         head: methodFactory("HEAD"),
+        /** HTTP OPTIONS request. @see {@link request} for options. */
         options: methodFactory("OPTIONS"),
-        /** Returns aggregated metrics snapshot, or null if metrics are disabled. */
+        /**
+         * Returns aggregated metrics snapshot, or null if metrics are disabled.
+         * Includes request counts, success/failure breakdown, and duration histogram.
+         */
         metrics: () => metricsCollector.getMetrics(),
-        /** Health checker controller. Null if health checks are disabled. */
+        /**
+         * Health checker controller. Null if health checks are disabled.
+         * Use `.isHealthy()` to check backend status, `.stop()` to stop the interval.
+         */
         healthCheck: healthChecker
             ? { isHealthy: () => healthChecker.healthy, stop: () => healthChecker.stop() }
             : null,
-        /** Register a custom middleware function in the request pipeline. */
+        /**
+         * Register a custom middleware function in the request pipeline.
+         * The middleware runs before the transport and can modify the request or response.
+         *
+         * @param fn - Middleware function: `(ctx, next) => Promise<void>`.
+         *             Call `await next()` to pass control to the next layer.
+         *
+         * @example
+         * ```ts
+         * client.use(async (ctx, next) => {
+         *   console.log("→", ctx.url);
+         *   await next();
+         *   console.log("←", ctx.response?.status);
+         * });
+         * ```
+         */
         use: (fn: SolvixMiddleware) => {
             middlewares.splice(middlewares.length - 1, 0, fn);
             run = compose(middlewares);
