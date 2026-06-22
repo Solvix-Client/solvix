@@ -55,7 +55,9 @@ export type SolvixEventType =
     | "request:shadowStart"
     | "request:shadowComplete"
     | "request:shadowDifference"
-    | "request:shadowError";
+    | "request:shadowError"
+    | "health:change";
+
 
 export interface SolvixSecurityOptions {
     enforceHTTPS?: boolean;
@@ -127,7 +129,7 @@ export interface RequestGroupStats {
 
 export interface SolvixEvent {
     type: SolvixEventType;
-    context: SolvixContext<any>;
+    context?: SolvixContext<any>;
     timestamp: number;
 }
 
@@ -219,6 +221,75 @@ export interface ProgressPayload {
     percent?: number;
 }
 
+/** Automatically assigns a unique X-Request-ID header to every outgoing request. */
+export interface CorrelationOptions {
+    /** Default: true (enabled by default) */
+    enabled?: boolean;
+    /** Default: "x-request-id" */
+    headerName?: string;
+    /** Custom ID generator. Default: crypto.randomUUID() */
+    generator?: () => string;
+}
+
+/** Aggregated request metrics collected across the client's lifetime. */
+export interface MetricsOptions {
+    enabled?: boolean;
+    /** Duration histogram bucket thresholds in ms. Default: [50, 100, 200, 500, 1000, 3000, 5000] */
+    durationBuckets?: number[];
+}
+
+export interface MetricsSnapshot {
+    totalRequests: number;
+    activeRequests: number;
+    successCount: number;
+    failureCount: number;
+    retryCount: number;
+    durationHistogram: Record<string, number>;
+    startTime: number;
+}
+
+/** W3C Trace Context propagation for distributed tracing. */
+export interface TracingOptions {
+    enabled?: boolean;
+    /** Header name. Default: "traceparent" */
+    traceHeader?: string;
+}
+
+/** Periodic endpoint health checking. */
+export interface HealthCheckOptions {
+    enabled?: boolean;
+    /** Health endpoint URL (e.g. "/health") */
+    endpoint: string;
+    /** Check interval in ms. Default: 30000 */
+    interval?: number;
+    /** Request timeout in ms. Default: 5000 */
+    timeout?: number;
+    /** Expected HTTP status. Default: 200 */
+    expectedStatus?: number;
+    /** Called when health status changes */
+    onStatusChange?: (healthy: boolean) => void;
+}
+
+/** CSRF protection — reads token from cookie, injects as header on state-changing methods. */
+export interface CSRFOptions {
+    enabled?: boolean;
+    /** Cookie name to read the token from. Default: "XSRF-TOKEN" */
+    cookieName?: string;
+    /** Header name to inject the token into. Default: "X-XSRF-TOKEN" */
+    headerName?: string;
+    /** Methods that require CSRF protection. Default: ["POST", "PUT", "PATCH", "DELETE"] */
+    methods?: HttpMethod[];
+    /** Custom cookie reader. Default reads from document.cookie */
+    getCookie?: () => string | null;
+}
+
+/** Simple in-memory cookie jar for environments without native cookie storage. */
+export interface CookieJarOptions {
+    enabled?: boolean;
+    /** Optional domain filter — only store/send cookies matching this domain. */
+    domain?: string;
+}
+
 export interface SolvixLogger {
     debug: (msg: string, meta?: Record<string, unknown>) => void;
     info: (msg: string, meta?: Record<string, unknown>) => void;
@@ -290,6 +361,18 @@ export interface SolvixOptions {
     fallbackURLs?: string[];
     /** Structured logger — plug in pino, winston, console, or a custom adapter. */
     logger?: SolvixLogger;
+    /** Auto-assign unique X-Request-ID header to every request. */
+    correlation?: CorrelationOptions;
+    /** Aggregated request metrics (counters, histograms). */
+    metrics?: MetricsOptions;
+    /** W3C Trace Context propagation (traceparent header). */
+    tracing?: TracingOptions;
+    /** Periodic health check endpoint pinging. */
+    healthCheck?: HealthCheckOptions;
+    /** CSRF protection — injects token from cookie into header. */
+    csrf?: CSRFOptions;
+    /** In-memory cookie jar for environments without native cookie storage. */
+    cookieJar?: CookieJarOptions;
     /** @internal */
     __tokenRefreshAttempted?: boolean;
     /** @internal */
@@ -331,6 +414,12 @@ export interface SolvixMeta {
     timeline?: TimelineEntry[];
     profile?: ProfileMetrics;
     snapshot?: RequestSnapshot;
+    /** Correlation ID (X-Request-ID) when correlation feature is enabled. */
+    correlationId?: string;
+    /** W3C trace ID when tracing feature is enabled. */
+    traceId?: string;
+    /** W3C span ID when tracing feature is enabled. */
+    spanId?: string;
 }
 
 export interface SolvixContext<T = unknown> {

@@ -6,6 +6,12 @@ import { executeShadow } from "../core/shadowExecutor";
 import { setupOfflineListener } from "../core/offlineManager";
 import { offlineQueue } from "../store/offlineQueue";
 import { handleStream } from "../streaming/streamHandler";
+import { applyCorrelationId } from "./correlation";
+import { createMetricsCollector } from "./metricsCollector";
+import { applyTracing } from "./tracer";
+import { HealthChecker } from "./healthChecker";
+import { applyCSRF } from "../security/csrfProtector";
+import { CookieJar } from "../store/cookieJar";
 import { PriorityQueue } from "../resilience/priorityQueue";
 import { RateLimiter } from "../resilience/rateLimiter";
 import { CircuitBreaker } from "../resilience/circuitBreaker";
@@ -14,6 +20,7 @@ import { compose } from "./compose";
 import { createContext } from "./context";
 import { transportMiddleware } from "./transport";
 import { timeoutMiddleware } from "./timeout";
+import { SolvixBus } from "./bus";
 import { SolvixError } from "../errors";
 import { sleep } from "../utils/sleep";
 import {
@@ -47,7 +54,6 @@ import { markTimeline } from "../utils/timeline";
 import { getNetworkDuration } from "../utils/retryAnalytics";
 import { buildProfile } from "../utils/profiler";
 import { runDevWarnings } from "../utils/devWarnings";
-import { SolvixBus } from "./bus";
 import { RequestGroup } from "./group";
 import { dependencyRegistry } from "./dependencyRegistry";
 import { buildSnapshot } from "../utils/snapshotBuilder";
@@ -94,6 +100,38 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         : null;
 
     const run = compose(middlewares);
+
+    // Metrics collector
+    const metricsCollector = createMetricsCollector(globalOptions.metrics);
+    if (globalOptions.metrics?.enabled) {
+        const mc = metricsCollector;
+        SolvixBus.on("request:start", mc.onStart!);
+        SolvixBus.on("request:complete", mc.onComplete!);
+        SolvixBus.on("request:error", mc.onError!);
+        SolvixBus.on("request:retry", mc.onRetry!);
+    }
+
+    // Health checker
+    const healthChecker = globalOptions.healthCheck?.enabled
+        ? new HealthChecker(globalOptions.healthCheck, (async (url: string, opts?: Record<string, any>) => {
+            // Use a lightweight request that bypasses most features
+            return request(url, {
+                ...opts,
+                method: "GET" as HttpMethod,
+                priority: 1,
+                // prevent the health check from showing up in user metrics
+            });
+        }))
+        : null;
+
+    if (healthChecker) {
+        healthChecker.start();
+    }
+
+    // Cookie jar
+    const cookieJar = globalOptions.cookieJar?.enabled
+        ? new CookieJar(globalOptions.cookieJar)
+        : null;
 
     if (
         typeof window !== "undefined" &&
@@ -315,7 +353,8 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                     status: error.status,
                     attempts: ctx.meta.attempt,
                     retries: ctx.meta.retries,
-                    runtime: ctx.meta.runtime
+                    runtime: ctx.meta.runtime,
+                    correlationId: ctx.meta.correlationId
                 });
 
                 if (ctx.options.id) {
@@ -401,6 +440,9 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 markTimeline(ctx, "rateLimitWaitEnd");
             }
 
+            // Correlation ID — set once per request
+            applyCorrelationId(ctx, globalOptions.correlation);
+
             const retryConfig = normalizeRetry(ctx.options.retry);
             const fallbackURLs = ctx.options.fallbackURLs ?? [];
             let attempt = 0;
@@ -454,6 +496,26 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         };
                     }
 
+                    // Distributed tracing — new spanId per attempt
+                    applyTracing(ctx, globalOptions.tracing, attempt);
+
+                    // CSRF token injection (for state-changing methods)
+                    applyCSRF(ctx, globalOptions.csrf);
+
+                    // Cookie jar — attach stored cookies to outgoing request
+                    if (cookieJar) {
+                        const jarHeaders = cookieJar.getRequestHeaders(ctx.url);
+                        if (Object.keys(jarHeaders).length > 0) {
+                            const headers = new Headers(ctx.options.fetch?.headers);
+                            for (const [key, val] of Object.entries(jarHeaders)) {
+                                if (!headers.has(key.toLowerCase())) {
+                                    headers.set(key, val);
+                                }
+                            }
+                            ctx.options.fetch = { ...ctx.options.fetch, headers };
+                        }
+                    }
+
                     markTimeline(ctx, "transportStart");
 
                     // ETag Conditional Header
@@ -474,6 +536,11 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         }
                     }
                     await run(ctx);
+
+                    // Cookie jar — store cookies from response
+                    if (cookieJar && ctx.response) {
+                        cookieJar.setFromResponse(ctx.response);
+                    }
 
                     // SECURITY — Response Size Guard
                     const sizeChunks = await checkResponseSize(
@@ -908,6 +975,12 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         patch: methodFactory("PATCH"),
         delete: methodFactory("DELETE"),
         head: methodFactory("HEAD"),
-        options: methodFactory("OPTIONS")
+        options: methodFactory("OPTIONS"),
+        /** Returns aggregated metrics snapshot, or null if metrics are disabled. */
+        metrics: () => metricsCollector.getMetrics(),
+        /** Health checker controller. Null if health checks are disabled. */
+        healthCheck: healthChecker
+            ? { isHealthy: () => healthChecker.healthy, stop: () => healthChecker.stop() }
+            : null
     };
 }
