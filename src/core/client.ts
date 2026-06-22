@@ -55,6 +55,7 @@ import { tokenOrchestrator } from "./tokenOrchestrator";
 import { getETag, setETag, clearETag } from "../store/etagStore";
 import { defaultTransport } from "../core/defaultTransport";
 import { sanitizeRawHeaders } from "../security/headerSanitizer";
+import { trackDownloadProgress, trackUploadProgress } from "./progressReport";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -309,6 +310,14 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             /** Finalize a failed request: snapshot, bus event, hooks, and throw.
              *  Caller must markTimeline("failed") and handle group/breaker first. */
             const finalizeFailure = (error: SolvixError): never => {
+                ctx.options.logger?.error?.(`Request failed: ${error.message}`, {
+                    url: ctx.url,
+                    status: error.status,
+                    attempts: ctx.meta.attempt,
+                    retries: ctx.meta.retries,
+                    runtime: ctx.meta.runtime
+                });
+
                 if (ctx.options.id) {
                     dependencyRegistry.reject(ctx.options.id, error);
                 }
@@ -347,6 +356,11 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 type: "request:start",
                 context: ctx,
                 timestamp: Date.now()
+            });
+
+            ctx.options.logger?.info?.("Request started", {
+                url: ctx.url,
+                method
             });
 
             const signal = ctx.options.fetch?.signal ?? undefined;
@@ -388,7 +402,9 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
 
             const retryConfig = normalizeRetry(ctx.options.retry);
+            const fallbackURLs = ctx.options.fallbackURLs ?? [];
             let attempt = 0;
+            let fallbackIdx = 0;
 
             while (attempt <= retryConfig.retries) {
                 try {
@@ -409,7 +425,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             ctx.options.fetch?.headers
                         );
 
-                        const builtBody = await buildRequestBody(
+                        let builtBody = await buildRequestBody(
                             ctx.options.body,
                             ctx.options.bodyType,
                             headers,
@@ -422,6 +438,14 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             builtBody as BodyInit,
                             security.maxBodySize
                         );
+
+                        // Upload progress tracking
+                        if (ctx.options.hooks?.onUploadProgress) {
+                            builtBody = trackUploadProgress(
+                                builtBody as BodyInit,
+                                ctx.options.hooks.onUploadProgress
+                            ) as typeof builtBody;
+                        }
 
                         ctx.options.fetch = {
                             ...ctx.options.fetch,
@@ -468,6 +492,36 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                                 headers: ctx.response!.headers
                             }
                         );
+                    }
+
+                    // Download progress tracking (wraps response body with a counting stream)
+                    if (ctx.options.hooks?.onDownloadProgress && ctx.response) {
+                        ctx.response = trackDownloadProgress(
+                            ctx.response,
+                            ctx.options.hooks.onDownloadProgress
+                        );
+                    }
+
+                    // Adaptive rate limiting from response headers
+                    if (limiter) {
+                        const remaining = ctx.response!.headers.get("X-RateLimit-Remaining");
+                        const resetVal = ctx.response!.headers.get("X-RateLimit-Reset");
+                        if (remaining !== null) {
+                            limiter.syncFromHeaders(
+                                parseInt(remaining, 10),
+                                resetVal !== null ? parseInt(resetVal, 10) : undefined
+                            );
+                        }
+
+                        // Also handle standard Retry-After for 429 responses
+                        const retryAfter = ctx.response!.headers.get("Retry-After");
+                        if (retryAfter !== null && ctx.response!.status === 429) {
+                            const seconds = parseInt(retryAfter, 10);
+                            if (!isNaN(seconds)) {
+                                // Schedule next refill after the server-requested delay
+                                limiter.syncFromHeaders(0, Math.ceil(Date.now() / 1000) + seconds);
+                            }
+                        }
                     }
 
                     // Handle 304 Not Modified
@@ -582,6 +636,13 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             }
                         }
 
+                        // Try fallback URLs before final failure
+                        if (solvixError.isRetryable && fallbackIdx < fallbackURLs.length) {
+                            ctx.url = fallbackURLs[fallbackIdx++]!;
+                            attempt = 0;
+                            continue;
+                        }
+
                         finalizeFailure(solvixError);
                     }
 
@@ -594,6 +655,12 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         type: "request:retry",
                         context: ctx,
                         timestamp: Date.now()
+                    });
+
+                    ctx.options.logger?.warn?.("Request retrying", {
+                        url: ctx.url,
+                        attempt,
+                        retries: ctx.meta.retries
                     });
 
                     const networkTime =
@@ -638,6 +705,18 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                     ctx.options.transformResponse
                 );
                 markTimeline(ctx, "parseEnd");
+            }
+
+            // Response schema validation
+            if (ctx.options.validateResponse) {
+                try {
+                    data = ctx.options.validateResponse(data);
+                } catch (err) {
+                    throw new SolvixError({
+                        message: `Response validation failed: ${err instanceof Error ? err.message : String(err)}`,
+                        isRetryable: false
+                    });
+                }
             }
 
             ctx.meta.endTime = Date.now();
@@ -701,6 +780,13 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 type: "request:complete",
                 context: ctx,
                 timestamp: Date.now()
+            });
+
+            ctx.options.logger?.info?.("Request completed", {
+                url: ctx.url,
+                status: ctx.response!.status,
+                duration: ctx.meta.duration,
+                runtime: ctx.meta.runtime
             });
 
             if (

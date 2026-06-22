@@ -212,12 +212,28 @@ export interface QueueOptions {
     strategy?: QueueStrategy;
 }
 
+export interface ProgressPayload {
+    loaded: number;
+    total?: number;
+    /** Convenience: Math.round((loaded / total) * 100) when total is known */
+    percent?: number;
+}
+
+export interface SolvixLogger {
+    debug: (msg: string, meta?: Record<string, unknown>) => void;
+    info: (msg: string, meta?: Record<string, unknown>) => void;
+    warn: (msg: string, meta?: Record<string, unknown>) => void;
+    error: (msg: string, meta?: Record<string, unknown>) => void;
+}
+
 export interface SolvixHooks {
     onRequestStart?: (ctx: any) => void;
     onRequestEnd?: (ctx: any) => void;
     onRetry?: (ctx: any, attempt: number) => void;
     onError?: (error: unknown, ctx: any) => void;
     onCircuitOpen?: (host: string) => void;
+    onUploadProgress?: (progress: ProgressPayload) => void;
+    onDownloadProgress?: (progress: ProgressPayload) => void;
 }
 
 export interface StreamOptions {
@@ -267,6 +283,13 @@ export interface SolvixOptions {
     transport?: SolvixTransport;
     params?: Record<string, any>;
     security?: SolvixSecurityOptions;
+    /** Response schema validation callback. Return the validated data or throw.
+     *  Users can pass Zod's `.parse()`, Valibot's `safeParse`, or a custom fn. */
+    validateResponse?: (data: unknown) => any;
+    /** URLs to try in order when the primary URL fails with a retryable error. */
+    fallbackURLs?: string[];
+    /** Structured logger — plug in pino, winston, console, or a custom adapter. */
+    logger?: SolvixLogger;
     /** @internal */
     __tokenRefreshAttempted?: boolean;
     /** @internal */
