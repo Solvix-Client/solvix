@@ -290,6 +290,30 @@ export interface CookieJarOptions {
     domain?: string;
 }
 
+/** TLS/SSL configuration for Node.js environments (requires undici). */
+export interface TLSOptions {
+    /** Skip certificate validation. Default: true. Set to false for self-signed certs. */
+    rejectUnauthorized?: boolean;
+    /** Custom CA certificate (PEM string) */
+    ca?: string;
+    /** Client certificate (PEM string) for mutual TLS */
+    cert?: string;
+    /** Client key (PEM string) for mutual TLS */
+    key?: string;
+    /** Passphrase for the client key */
+    passphrase?: string;
+}
+
+/** HTTP proxy configuration for Node.js environments (requires undici). */
+export interface ProxyOptions {
+    host: string;
+    port: number;
+    /** Proxy protocol. Default: "http" */
+    protocol?: "http" | "https";
+    /** Proxy authentication */
+    auth?: { username: string; password: string };
+}
+
 export interface SolvixLogger {
     debug: (msg: string, meta?: Record<string, unknown>) => void;
     info: (msg: string, meta?: Record<string, unknown>) => void;
@@ -373,6 +397,12 @@ export interface SolvixOptions {
     csrf?: CSRFOptions;
     /** In-memory cookie jar for environments without native cookie storage. */
     cookieJar?: CookieJarOptions;
+    /** TLS/SSL configuration for Node.js (self-signed certs, mTLS). Requires undici. */
+    tls?: TLSOptions;
+    /** HTTP proxy for Node.js. Requires undici. */
+    proxy?: ProxyOptions;
+    /** Custom query parameter serializer. Overrides the default URLSearchParams-based serializer. */
+    paramsSerializer?: (params: Record<string, any>) => string;
     /** @internal */
     __tokenRefreshAttempted?: boolean;
     /** @internal */

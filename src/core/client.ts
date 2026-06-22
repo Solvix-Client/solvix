@@ -71,10 +71,23 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         globalOptions.queue?.strategy ?? "fifo"
     );
 
-    const middlewares: SolvixMiddleware[] = [
+    let middlewares: SolvixMiddleware[] = [
         timeoutMiddleware,
         transportMiddleware
     ];
+
+    let run = compose(middlewares);
+
+    // Proxy/TLS transport for Node.js (fire-and-forget init — resolves before first real request)
+    if (globalOptions.proxy || globalOptions.tls) {
+        import("../node/nodeTransport").then(({ createNodeTransport }) =>
+            createNodeTransport(globalOptions.tls, globalOptions.proxy)
+        ).then((transport) => {
+            if (transport) {
+                globalOptions.transport = transport;
+            }
+        }).catch(() => { /* undici not available — use default transport */ });
+    }
 
     const limiter = globalOptions.rateLimit
         ? new RateLimiter(
@@ -98,8 +111,6 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             })
         })
         : null;
-
-    const run = compose(middlewares);
 
     // Metrics collector
     const metricsCollector = createMetricsCollector(globalOptions.metrics);
@@ -231,10 +242,12 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
         // Apply query params BEFORE fingerprinting
         if (mergedOptions.params) {
-            resolvedUrl = buildQueryString(
-                resolvedUrl,
-                mergedOptions.params
-            );
+            resolvedUrl = mergedOptions.paramsSerializer
+                ? mergedOptions.paramsSerializer(mergedOptions.params)
+                : buildQueryString(
+                    resolvedUrl,
+                    mergedOptions.params
+                );
         }
 
         if (globalOptions.allowedOrigins) {
@@ -981,6 +994,11 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         /** Health checker controller. Null if health checks are disabled. */
         healthCheck: healthChecker
             ? { isHealthy: () => healthChecker.healthy, stop: () => healthChecker.stop() }
-            : null
+            : null,
+        /** Register a custom middleware function in the request pipeline. */
+        use: (fn: SolvixMiddleware) => {
+            middlewares.splice(middlewares.length - 1, 0, fn);
+            run = compose(middlewares);
+        }
     };
 }
