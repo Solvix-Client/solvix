@@ -9,7 +9,9 @@ export async function generateFingerprint(
     method: string,
     url: string,
     fetchOptions?: RequestInit,
-    options?: FingerprintOptions
+    options?: FingerprintOptions,
+    /** When true, skip the SHA-256 hash and return a lightweight key. */
+    skipHash?: boolean
 ): Promise<string> {
 
     const canonicalUrl = canonicalizeUrl(url);
@@ -54,6 +56,11 @@ export async function generateFingerprint(
 
     if (options?.customStrategy) {
         return options.customStrategy(canonical);
+    }
+
+    // Fast path: skip expensive SHA-256 when no storage feature needs it
+    if (skipHash) {
+        return canonicalUrl;
     }
 
     return await hashString(

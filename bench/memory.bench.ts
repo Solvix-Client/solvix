@@ -1,4 +1,4 @@
-import { createClient } from "../dist/index.js";
+import { createClient } from "../src";
 
 globalThis.fetch = async () => {
     return {
@@ -22,30 +22,28 @@ function formatMB(bytes: number) {
 }
 
 async function run() {
-    // global.gc?.();
+    console.log("\n=== Memory Stability Test ===");
 
-    // console.log("Initial Heap:", formatMB(process.memoryUsage().heapUsed));
-
-    // for (let i = 0; i < 10000; i++) {
-    //     await client.get("https://test.com");
-    // }
-
-    // global.gc?.();
-
-    // console.log("After 10k requests:", formatMB(process.memoryUsage().heapUsed));
-
-    
     for (let round = 1; round <= 3; round++) {
-        global.gc?.();
-        console.log(`Round ${round} start:`, formatMB(process.memoryUsage().heapUsed));
+        if (typeof globalThis.gc === "function") globalThis.gc();
+        const startHeap = process.memoryUsage().heapUsed;
+        console.log(`Round ${round} start: ${formatMB(startHeap)}`);
 
         for (let i = 0; i < 10000; i++) {
             await client.get("https://test.com");
         }
 
-        global.gc?.();
-        console.log(`Round ${round} end:`, formatMB(process.memoryUsage().heapUsed));
+        if (typeof globalThis.gc === "function") globalThis.gc();
+        const endHeap = process.memoryUsage().heapUsed;
+        const growth = endHeap - startHeap;
+        console.log(`Round ${round} end:   ${formatMB(endHeap)} (growth: ${formatMB(growth)})`);
+
+        if (growth > 50 * 1024 * 1024) {
+            console.log(`⚠️  Warning: Memory growth of ${formatMB(growth)} exceeds 50 MB threshold`);
+        }
     }
+
+    console.log(`Memory test complete.`);
 }
 
 run();

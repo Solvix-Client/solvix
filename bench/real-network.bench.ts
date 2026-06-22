@@ -1,5 +1,5 @@
 import { Bench } from "tinybench";
-import { createClient } from "../dist/index.js";
+import { createClient } from "../src";
 import axios from "axios";
 
 const client = createClient();
@@ -19,14 +19,20 @@ bench
 
 await bench.run();
 
-console.log("Benchmark results:", bench.results);
-
-// console.table(
-//     bench.tasks.map(task => {
-//         const r = task.result as any;
-//         return {
-//             name: task.name,
-//             avgMs: r.period.mean.toFixed(2)
-//         };
-//     })
-// );
+console.log("\n=== Real Network Benchmark ===");
+console.log("Target: https://jsonplaceholder.typicode.com/posts");
+console.log("Duration: 5 seconds per client\n");
+console.table(
+    bench.tasks.map(task => {
+        const r = task.result as any;
+        if (!r || r.state !== "completed") {
+            return { name: task.name, avgMs: "-", opsPerSec: "-", samples: "-" };
+        }
+        return {
+            name: task.name,
+            avgMs: r.latency?.mean !== undefined ? r.latency.mean.toFixed(2) : "-",
+            opsPerSec: r.throughput?.mean !== undefined ? Math.round(r.throughput.mean).toLocaleString() : "-",
+            samples: r.samples?.length ?? "-"
+        };
+    })
+);

@@ -28,11 +28,13 @@ export function buildTraceParent(traceId: string, spanId: string): string {
  * Injects a W3C traceparent header into the request.
  * Same traceId is used across all retry attempts; a new spanId is generated per attempt.
  * Called inside the retry loop, before transport.
+ * If `headers` is provided, it mutates it in-place instead of creating a new Headers.
  */
 export function applyTracing(
     ctx: SolvixContext,
     options: TracingOptions | undefined,
-    attempt: number
+    attempt: number,
+    headers?: Headers
 ): void {
     if (!options?.enabled) return;
 
@@ -45,11 +47,13 @@ export function applyTracing(
     ctx.meta.spanId = generateSpanId();
 
     const headerName = (options.traceHeader || DEFAULT_HEADER).toLowerCase();
-    const headers = new Headers(ctx.options.fetch?.headers);
+    const h = headers ?? new Headers(ctx.options.fetch?.headers);
 
     // Don't overwrite user-supplied trace header
-    if (!headers.has(headerName)) {
-        headers.set(headerName, buildTraceParent(ctx.meta.traceId, ctx.meta.spanId));
-        ctx.options.fetch = { ...ctx.options.fetch, headers };
+    if (!h.has(headerName)) {
+        h.set(headerName, buildTraceParent(ctx.meta.traceId, ctx.meta.spanId));
+        if (!headers) {
+            ctx.options.fetch = { ...ctx.options.fetch, headers: h };
+        }
     }
 }

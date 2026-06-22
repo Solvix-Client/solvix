@@ -5,9 +5,23 @@ type Deferred = {
     dependsOn: string[];
 };
 
+const MAX_REGISTRY = 10000;
+const evictionOrder: string[] = [];
+
 class DependencyRegistry {
 
     private registry = new Map<string, Deferred>();
+
+    private enforceMaxSize(): void {
+        while (this.registry.size >= MAX_REGISTRY) {
+            const oldest = evictionOrder.shift();
+            if (oldest !== undefined) {
+                this.registry.delete(oldest);
+            } else {
+                break;
+            }
+        }
+    }
 
     private detectCircular(start: string, current: string): boolean {
         if (start === current) return true;
@@ -44,6 +58,8 @@ class DependencyRegistry {
             }
         }
 
+        this.enforceMaxSize();
+
         let resolve!: (value?: any) => void;
         let reject!: (reason?: any) => void;
 
@@ -58,18 +74,23 @@ class DependencyRegistry {
             reject,
             dependsOn: dependsOn ?? []
         });
+        evictionOrder.push(id);
     }
 
     resolve(id: string, value?: any) {
         const entry = this.registry.get(id);
         if (!entry) return;
         entry.resolve(value);
+        this.registry.delete(id);
+        this.removeFromEviction(id);
     }
 
     reject(id: string, error?: any) {
         const entry = this.registry.get(id);
         if (!entry) return;
         entry.reject(error);
+        this.registry.delete(id);
+        this.removeFromEviction(id);
     }
 
     async waitFor(id: string) {
@@ -80,6 +101,13 @@ class DependencyRegistry {
 
     has(id: string) {
         return this.registry.has(id);
+    }
+
+    private removeFromEviction(id: string): void {
+        const idx = evictionOrder.indexOf(id);
+        if (idx !== -1) {
+            evictionOrder.splice(idx, 1);
+        }
     }
 }
 

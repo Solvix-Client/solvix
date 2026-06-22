@@ -14,10 +14,12 @@ function readCookieFromDocument(name: string): string | null {
 /**
  * Injects a CSRF token from a cookie into a request header for state-changing methods.
  * Called inside the retry loop, after header sanitization, before transport.
+ * If `headers` is provided, it mutates it in-place instead of creating a new Headers.
  */
 export function applyCSRF(
     ctx: SolvixContext,
-    options: CSRFOptions | undefined
+    options: CSRFOptions | undefined,
+    headers?: Headers
 ): void {
     if (!options?.enabled) return;
 
@@ -29,15 +31,18 @@ export function applyCSRF(
     const headerName = options.headerName || DEFAULT_HEADER_NAME;
     const cookieName = options.cookieName || DEFAULT_COOKIE_NAME;
 
+    const h = headers ?? new Headers(ctx.options.fetch?.headers);
+
     // Don't overwrite user-supplied header
-    const existingHeaders = new Headers(ctx.options.fetch?.headers);
-    if (existingHeaders.has(headerName.toLowerCase())) return;
+    if (h.has(headerName.toLowerCase())) return;
 
     const getCookie = options.getCookie ?? (() => readCookieFromDocument(cookieName));
     const token = getCookie();
 
     if (token) {
-        existingHeaders.set(headerName, token);
-        ctx.options.fetch = { ...ctx.options.fetch, headers: existingHeaders };
+        h.set(headerName, token);
+        if (!headers) {
+            ctx.options.fetch = { ...ctx.options.fetch, headers: h };
+        }
     }
 }

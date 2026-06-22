@@ -329,12 +329,18 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
         const priority = ctx.options.priority ?? DEFAULT_PRIORITY;
 
+        const needsFingerprint =
+            ctx.options.dedupe ||
+            ctx.options.cache ||
+            ctx.options.etag?.enabled;
+
         const fingerprint =
             await generateFingerprint(
                 ctx.options.fetch?.method ?? "GET",
                 ctx.url,
                 ctx.options.fetch,
-                ctx.options.fingerprint
+                ctx.options.fingerprint,
+                !needsFingerprint
             );
 
         const method = ctx.options.fetch?.method ?? "GET";
@@ -509,26 +515,29 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         };
                     }
 
+                    // Consolidate header mutations — single Headers object
+                    const reqHeaders = new Headers(ctx.options.fetch?.headers);
+
                     // Distributed tracing — new spanId per attempt
-                    applyTracing(ctx, globalOptions.tracing, attempt);
+                    applyTracing(ctx, globalOptions.tracing, attempt, reqHeaders);
 
                     // CSRF token injection (for state-changing methods)
-                    applyCSRF(ctx, globalOptions.csrf);
+                    applyCSRF(ctx, globalOptions.csrf, reqHeaders);
 
-                    // Cookie jar — attach stored cookies to outgoing request
+                    // Cookie jar — attach stored cookies
                     if (cookieJar) {
                         const jarHeaders = cookieJar.getRequestHeaders(ctx.url);
                         if (Object.keys(jarHeaders).length > 0) {
-                            const headers = new Headers(ctx.options.fetch?.headers);
                             for (const [key, val] of Object.entries(jarHeaders)) {
-                                if (!headers.has(key.toLowerCase())) {
-                                    headers.set(key, val);
+                                if (!reqHeaders.has(key.toLowerCase())) {
+                                    reqHeaders.set(key, val);
                                 }
                             }
-                            ctx.options.fetch = { ...ctx.options.fetch, headers };
                         }
                     }
 
+                    // Apply consolidated headers (mutate in-place, no spread)
+                    (ctx.options.fetch as Record<string, any>).headers = reqHeaders;
                     markTimeline(ctx, "transportStart");
 
                     // ETag Conditional Header
