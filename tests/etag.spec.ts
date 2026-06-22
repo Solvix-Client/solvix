@@ -191,7 +191,7 @@ describe("ETag handling", () => {
 
         // First request — stores ETag, no If-None-Match
         await client.get("/item");
-        const firstInit = vi.mocked(global.fetch).mock.calls[0][1];
+        const firstInit = vi.mocked(global.fetch).mock.calls[0]![1];
         expect(new Headers(firstInit?.headers).get("If-None-Match")).toBeNull();
 
         // Advance time past cache TTL
@@ -199,7 +199,7 @@ describe("ETag handling", () => {
 
         // Second request — cache expired, should send If-None-Match
         await client.get("/item");
-        const secondInit = vi.mocked(global.fetch).mock.calls[1][1];
+        const secondInit = vi.mocked(global.fetch).mock.calls[1]![1];
         expect(new Headers(secondInit?.headers).get("If-None-Match")).toBe('"etag-value"');
     });
 

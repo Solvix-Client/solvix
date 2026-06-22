@@ -11,6 +11,15 @@ type HostMetrics = {
 export class CircuitBreaker {
 
     private hosts = new Map<string, HostMetrics>();
+    private config: {
+        failureThreshold: number;
+        failureRate: number;
+        rollingWindow: number;
+        minimumRequests: number;
+        resetTimeout: number;
+        halfOpenRequests: number;
+        onOpen?: (host: string) => void;
+    };
 
     constructor(config: {
         failureThreshold: number;

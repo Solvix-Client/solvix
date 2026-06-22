@@ -26,8 +26,8 @@ describe("Shadow Mode", () => {
 
         // Primary + shadow = 2 fetch calls
         expect(global.fetch).toHaveBeenCalledTimes(2);
-        expect(vi.mocked(global.fetch).mock.calls[0][0]).toBe("https://api.example.com/primary");
-        expect(vi.mocked(global.fetch).mock.calls[1][0]).toBe("https://shadow.api/primary");
+        expect(vi.mocked(global.fetch).mock.calls[0]![0]).toBe("https://api.example.com/primary");
+        expect(vi.mocked(global.fetch).mock.calls[1]![0]).toBe("https://shadow.api/primary");
     });
 
     it("should return primary response to caller (not shadow)", async () => {
@@ -149,7 +149,9 @@ describe("Shadow Mode", () => {
             expect(onDiff).toHaveBeenCalledTimes(1);
         });
 
-        const [primary, secondary] = onDiff.mock.calls[0];
+        const diffCall = onDiff.mock.calls[0]!;
+        const primary = diffCall[0];
+        const secondary = diffCall[1];
         expect(primary.data).toEqual({ value: 1 });
         expect(secondary.data).toEqual({ value: 2 });
     });
@@ -214,7 +216,7 @@ describe("Shadow Mode", () => {
             }
         });
 
-        const shadowInit = vi.mocked(global.fetch).mock.calls[1][1];
+        const shadowInit = vi.mocked(global.fetch).mock.calls[1]![1];
         const shadowHeaders = new Headers(shadowInit?.headers);
         expect(shadowHeaders.get("Authorization")).toBeNull();
         expect(shadowHeaders.get("X-Api-Key")).toBeNull();

@@ -477,7 +477,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         // Body was consumed by the size check — reconstruct
                         // the Response so parseResponse can still read it.
                         ctx.response = new Response(
-                            new Blob(sizeChunks),
+                            new Blob(sizeChunks as BlobPart[]),
                             {
                                 status: ctx.response!.status,
                                 statusText: ctx.response!.statusText,
