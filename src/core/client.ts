@@ -98,6 +98,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         typeof window !== "undefined" &&
         globalOptions.offline?.enabled
     ) {
+        offlineQueue.setMaxSize(globalOptions.offline.maxQueueSize ?? 100);
         setupOfflineListener();
     }
 
@@ -305,6 +306,41 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
         const task = async (): Promise<SolvixResponse<T>> => {
 
+            /** Finalize a failed request: snapshot, bus event, hooks, and throw.
+             *  Caller must markTimeline("failed") and handle group/breaker first. */
+            const finalizeFailure = (error: SolvixError): never => {
+                if (ctx.options.id) {
+                    dependencyRegistry.reject(ctx.options.id, error);
+                }
+
+                if (ctx.options.snapshot?.enabled) {
+                    ctx.meta.endTime = Date.now();
+                    ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
+
+                    ctx.meta.snapshot = {
+                        ...buildSnapshot(ctx),
+                        error: {
+                            message: error.message,
+                            ...(error.status !== undefined && { status: error.status })
+                        }
+                    };
+
+                    if (security.redactSnapshot) {
+                        redactSnapshotData(ctx);
+                    }
+                }
+
+                globalOptions.hooks?.onError?.(error, ctx);
+
+                SolvixBus.emit({
+                    type: "request:error",
+                    context: ctx,
+                    timestamp: Date.now()
+                });
+
+                throw error;
+            };
+
             globalOptions.hooks?.onRequestStart?.(ctx);
 
             SolvixBus.emit({
@@ -317,40 +353,14 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             if (signal?.aborted) {
                 markTimeline(ctx, "failed");
 
-                const error = new SolvixError({
-                    message: "Request aborted",
-                    isRetryable: false
-                });
-
                 if (ctx.options.group instanceof RequestGroup) {
                     ctx.options.group.markFailed();
                 }
 
-                if (ctx.options.id) {
-                    dependencyRegistry.reject(ctx.options.id, error);
-                }
-
-                if (ctx.options.snapshot?.enabled) {
-                    ctx.meta.endTime = Date.now();
-                    ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
-
-                    ctx.meta.snapshot = {
-                        ...buildSnapshot(ctx),
-                        error: { message: error.message }
-                    };
-
-                    if (security.redactSnapshot) {
-                        redactSnapshotData(ctx);
-                    }
-                }
-
-                SolvixBus.emit({
-                    type: "request:error",
-                    context: ctx,
-                    timestamp: Date.now()
-                });
-
-                throw error;
+                finalizeFailure(new SolvixError({
+                    message: "Request aborted",
+                    isRetryable: false
+                }));
             }
 
             const host = new URL(ctx.url).host;
@@ -360,40 +370,14 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 if (!breaker.canRequest(host)) {
                     markTimeline(ctx, "failed");
 
-                    const error = new SolvixError({
-                        message: "Circuit breaker is OPEN",
-                        isRetryable: false
-                    });
-
                     if (ctx.options.group instanceof RequestGroup) {
                         ctx.options.group.markFailed();
                     }
 
-                    if (ctx.options.id) {
-                        dependencyRegistry.reject(ctx.options.id, error);
-                    }
-
-                    if (ctx.options.snapshot?.enabled) {
-                        ctx.meta.endTime = Date.now();
-                        ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
-
-                        ctx.meta.snapshot = {
-                            ...buildSnapshot(ctx),
-                            error: { message: error.message }
-                        };
-
-                        if (security.redactSnapshot) {
-                            redactSnapshotData(ctx);
-                        }
-                    }
-
-                    SolvixBus.emit({
-                        type: "request:error",
-                        context: ctx,
-                        timestamp: Date.now()
-                    });
-
-                    throw error;
+                    finalizeFailure(new SolvixError({
+                        message: "Circuit breaker is OPEN",
+                        isRetryable: false
+                    }));
                 }
             }
 
@@ -598,40 +582,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             }
                         }
 
-                        // Dependency rejection only if truly failing
-                        if (ctx.options.id) {
-                            dependencyRegistry.reject(ctx.options.id, solvixError);
-                        }
-
-                        // Snapshot finalization
-                        if (ctx.options.snapshot?.enabled) {
-                            ctx.meta.endTime = Date.now();
-                            ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
-
-                            ctx.meta.snapshot = {
-                                ...buildSnapshot(ctx),
-                                error: {
-                                    message: solvixError.message,
-                                    ...(solvixError.status !== undefined && {
-                                        status: solvixError.status
-                                    })
-                                }
-                            };
-
-                            if (security.redactSnapshot) {
-                                redactSnapshotData(ctx);
-                            }
-                        }
-
-                        globalOptions.hooks?.onError?.(solvixError, ctx);
-
-                        SolvixBus.emit({
-                            type: "request:error",
-                            context: ctx,
-                            timestamp: Date.now()
-                        });
-
-                        throw solvixError;
+                        finalizeFailure(solvixError);
                     }
 
                     attempt++;

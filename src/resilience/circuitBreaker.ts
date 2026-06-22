@@ -30,14 +30,17 @@ export class CircuitBreaker {
         halfOpenRequests: number;
         onOpen?: (host: string) => void;
     }) {
+        // Clone to avoid mutating the caller's object
+        const normalized = { ...config };
+
         // Normalize failureRate: if > 1, treat as percentage (100 = 100%)
         // and convert to ratio (0-1). This supports both usage patterns:
         //   failureRate: 100  → percentage style
         //   failureRate: 1    → ratio style (backward compatible)
-        if (config.failureRate > 1) {
-            config.failureRate = config.failureRate / 100;
+        if (normalized.failureRate > 1) {
+            normalized.failureRate = normalized.failureRate / 100;
         }
-        this.config = config;
+        this.config = normalized;
     }
 
     private getHost(host: string): HostMetrics {
