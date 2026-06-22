@@ -12,7 +12,7 @@ export class CircuitBreaker {
 
     private hosts = new Map<string, HostMetrics>();
 
-    constructor(private config: {
+    constructor(config: {
         failureThreshold: number;
         failureRate: number;
         rollingWindow: number;
@@ -20,7 +20,16 @@ export class CircuitBreaker {
         resetTimeout: number;
         halfOpenRequests: number;
         onOpen?: (host: string) => void;
-    }) { }
+    }) {
+        // Normalize failureRate: if > 1, treat as percentage (100 = 100%)
+        // and convert to ratio (0-1). This supports both usage patterns:
+        //   failureRate: 100  → percentage style
+        //   failureRate: 1    → ratio style (backward compatible)
+        if (config.failureRate > 1) {
+            config.failureRate = config.failureRate / 100;
+        }
+        this.config = config;
+    }
 
     private getHost(host: string): HostMetrics {
         if (!this.hosts.has(host)) {

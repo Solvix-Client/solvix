@@ -37,6 +37,7 @@ import {
 } from "../store/inflight";
 import {
     getCache,
+    peekCache,
     setCache
 } from "../store/cache";
 
@@ -51,9 +52,9 @@ import { RequestGroup } from "./group";
 import { dependencyRegistry } from "./dependencyRegistry";
 import { buildSnapshot } from "../utils/snapshotBuilder";
 import { tokenOrchestrator } from "./tokenOrchestrator";
-import { getETag, setETag } from "../store/etagStore";
+import { getETag, setETag, clearETag } from "../store/etagStore";
 import { defaultTransport } from "../core/defaultTransport";
-import { sanitizeHeaders } from "../security/headerSanitizer";
+import { sanitizeRawHeaders } from "../security/headerSanitizer";
 
 export function createClient(globalOptions: SolvixOptions = {}) {
 
@@ -409,13 +410,20 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 try {
                     ctx.meta.attempt = attempt;
 
+                    // SECURITY — Header Sanitization & Injection Protection (all methods)
+                    // Sanitize at the plain-object layer to avoid Fetch API quirks
+                    // where the Headers constructor silently drops forbidden headers
+                    // like `Cookie` or throws on CRLF before we can intercept.
+                    if (ctx.options.fetch?.headers) {
+                        const raw = ctx.options.fetch.headers as Record<string, string>;
+                        const sanitized = sanitizeRawHeaders(raw, security.blockInsecureHeaders);
+                        ctx.options.fetch = { ...ctx.options.fetch, headers: sanitized };
+                    }
+
                     if (ctx.options.body !== undefined) {
                         const headers = new Headers(
                             ctx.options.fetch?.headers
                         );
-
-                        // SECURITY - Header Sanitization & Injection Protection
-                        sanitizeHeaders(headers, security.blockInsecureHeaders);
 
                         const builtBody = await buildRequestBody(
                             ctx.options.body,
@@ -460,19 +468,40 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                     await run(ctx);
 
                     // SECURITY — Response Size Guard
-                    await checkResponseSize(
+                    const sizeChunks = await checkResponseSize(
                         ctx.response!,
                         security.maxResponseSize
                     );
+
+                    if (sizeChunks) {
+                        // Body was consumed by the size check — reconstruct
+                        // the Response so parseResponse can still read it.
+                        ctx.response = new Response(
+                            new Blob(sizeChunks),
+                            {
+                                status: ctx.response!.status,
+                                statusText: ctx.response!.statusText,
+                                headers: ctx.response!.headers
+                            }
+                        );
+                    }
 
                     // Handle 304 Not Modified
                     if (
                         ctx.options.etag?.enabled &&
                         ctx.response?.status === 304
                     ) {
-                        const cached = getCache(fingerprint);
+                        // 304 means "not modified" — use cached data even if TTL expired.
+                        // Use peekCache (not getCache) because getCache deletes expired entries.
+                        const cached = peekCache(fingerprint);
 
                         if (cached) {
+                            // Renew TTL on 304 hit so the cache doesn't keep expiring
+                            const ttl = typeof ctx.options.cache === "boolean"
+                                ? 300000
+                                : (ctx.options.cache as { ttl: number })?.ttl ?? 300000;
+
+                            setCache(fingerprint, cached, ttl);
                             markTimeline(ctx, "etagHit");
 
                             if (breaker) {
@@ -481,6 +510,23 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
                             return cached as SolvixResponse<T>;
                         }
+
+                        // No cached data at all (ETag stored but cache was never written).
+                        // Clear the stale ETag so the next request re-fetches fresh,
+                        // and return 304 as a valid response instead of throwing.
+                        clearETag(fingerprint);
+                        markTimeline(ctx, "etagHit");
+
+                        if (breaker) {
+                            breaker.recordSuccess(host);
+                        }
+
+                        return {
+                            data: undefined as T,
+                            status: 304,
+                            headers: ctx.response!.headers,
+                            meta: ctx.meta
+                        } as SolvixResponse<T>;
                     }
                     markTimeline(ctx, "responseReceived");
 
@@ -670,14 +716,13 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
             if (
                 method === "GET" &&
-                ctx.options.cache &&
-                typeof ctx.options.cache !== "boolean"
+                ctx.options.cache
             ) {
-                setCache(
-                    fingerprint,
-                    response,
-                    ctx.options.cache.ttl
-                );
+                const ttl = typeof ctx.options.cache === "boolean"
+                    ? 300000  // default 5 min TTL for cache: true
+                    : ctx.options.cache.ttl;
+
+                setCache(fingerprint, response, ttl);
             }
 
             if (breaker) {
@@ -720,10 +765,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
 
             // Advanced Shadow Mode (Non-blocking)
-            if (
-                ctx.options.shadow?.enabled &&
-                typeof window !== "undefined"
-            ) {
+            if (ctx.options.shadow?.enabled) {
                 // Fire and forget
                 executeShadow(
                     ctx,
