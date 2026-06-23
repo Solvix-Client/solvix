@@ -9,6 +9,13 @@ class OfflineQueue {
         this.maxSize = maxSize;
     }
 
+    setMaxSize(size: number) {
+        this.maxSize = size;
+        while (this.queue.length > this.maxSize) {
+            this.queue.shift();
+        }
+    }
+
     enqueue(task: QueuedRequest) {
         if (this.queue.length >= this.maxSize) {
             this.queue.shift(); // Drop oldest

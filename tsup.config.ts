@@ -9,6 +9,7 @@ export default defineConfig({
     minify: true,
     treeshake: true,
     target: "es2022",
+    external: ["undici"],
 
     esbuildOptions(options) {
         options.metafile = true;

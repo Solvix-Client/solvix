@@ -8,7 +8,7 @@ type Task<T> = {
 
 export class PriorityQueue {
 
-    private queue: Task<any>[] = [];
+    private heap: Task<any>[] = [];
     private activeCount: number = 0;
 
     constructor(
@@ -24,19 +24,16 @@ export class PriorityQueue {
 
         return new Promise((resolve, reject) => {
 
-            const totalSize = this.queue.length + this.activeCount;
+            const totalSize = this.heap.length + this.activeCount;
 
             if (totalSize >= this.maxQueueSize) {
                 switch (this.strategy) {
-
                     case "drop-oldest":
-                        this.queue.shift();
+                        this.removeOldest();
                         break;
-
                     case "drop-lowest-priority":
                         this.removeLowestPriority();
                         break;
-
                     case "reject":
                     default:
                         reject(new Error("Queue overflow"));
@@ -52,42 +49,125 @@ export class PriorityQueue {
                 createdAt: Date.now()
             };
 
-            this.insertByPriority(item);
+            this.heapPush(item);
             this.process();
         });
     }
 
-    private insertByPriority(task: Task<any>): void {
-        let i = this.queue.length - 1;
+    // ─── Binary min-heap (lower priority number = higher priority) ───
 
-        while (i >= 0 && this.queue[i]!.priority > task.priority) {
-            i--;
-        }
-
-        this.queue.splice(i + 1, 0, task);
+    private heapPush(task: Task<any>): void {
+        this.heap.push(task);
+        this.bubbleUp(this.heap.length - 1);
     }
 
-    private removeLowestPriority(): void {
-        if (this.queue.length === 0) return;
+    private heapPop(): Task<any> | undefined {
+        if (this.heap.length === 0) return undefined;
+        const top = this.heap[0];
+        const last = this.heap.pop();
+        if (this.heap.length > 0 && last) {
+            this.heap[0] = last;
+            this.sinkDown(0);
+        }
+        return top;
+    }
 
-        let lowestIndex = 0;
-
-        for (let i = 1; i < this.queue.length; i++) {
-            if (this.queue[i]!.priority > this.queue[lowestIndex]!.priority) {
-                lowestIndex = i;
+    private bubbleUp(idx: number): void {
+        while (idx > 0) {
+            const parent = (idx - 1) >> 1;
+            const a = this.heap[idx]!;
+            const b = this.heap[parent]!;
+            if (a.priority < b.priority || (a.priority === b.priority && a.createdAt < b.createdAt)) {
+                this.heap[idx] = b;
+                this.heap[parent] = a;
+                idx = parent;
+            } else {
+                break;
             }
         }
+    }
 
-        this.queue.splice(lowestIndex, 1);
+    private sinkDown(idx: number): void {
+        const size = this.heap.length;
+        while (true) {
+            let smallest = idx;
+            const left = (idx << 1) + 1;
+            const right = left + 1;
+
+            if (left < size) {
+                const a = this.heap[left]!;
+                const b = this.heap[smallest]!;
+                if (a.priority < b.priority || (a.priority === b.priority && a.createdAt < b.createdAt)) {
+                    smallest = left;
+                }
+            }
+            if (right < size) {
+                const a = this.heap[right]!;
+                const b = this.heap[smallest]!;
+                if (a.priority < b.priority || (a.priority === b.priority && a.createdAt < b.createdAt)) {
+                    smallest = right;
+                }
+            }
+
+            if (smallest !== idx) {
+                const tmp = this.heap[idx]!;
+                this.heap[idx] = this.heap[smallest]!;
+                this.heap[smallest] = tmp;
+                idx = smallest;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // ─── Drop strategies ───
+
+    private removeLowestPriority(): void {
+        if (this.heap.length === 0) return;
+        let worstIdx = 0;
+        let worstPriority = this.heap[0]!.priority;
+        for (let i = 1; i < this.heap.length; i++) {
+            const p = this.heap[i]!.priority;
+            if (p > worstPriority) {
+                worstPriority = p;
+                worstIdx = i;
+            }
+        }
+        this.removeAtIndex(worstIdx);
+    }
+
+    private removeOldest(): void {
+        // Oldest is at index 0 (highest createdAt wins FIFO)
+        // The oldest item is the one that's been in the queue longest
+        if (this.heap.length === 0) return;
+        let oldestIdx = 0;
+        let oldestTime = this.heap[0]!.createdAt;
+        for (let i = 1; i < this.heap.length; i++) {
+            const t = this.heap[i]!.createdAt;
+            if (t < oldestTime) {
+                oldestTime = t;
+                oldestIdx = i;
+            }
+        }
+        this.removeAtIndex(oldestIdx);
+    }
+
+    private removeAtIndex(idx: number): void {
+        const last = this.heap.pop();
+        if (idx < this.heap.length && last) {
+            this.heap[idx] = last;
+            this.bubbleUp(idx);
+            this.sinkDown(idx);
+        }
     }
 
     // Arrow function locks "this"
     private process = (): void => {
         while (
             this.activeCount < this.concurrency &&
-            this.queue.length > 0
+            this.heap.length > 0
         ) {
-            const item = this.queue.shift();
+            const item = this.heapPop();
             if (!item) break;
 
             this.activeCount++;

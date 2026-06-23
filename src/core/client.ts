@@ -6,6 +6,12 @@ import { executeShadow } from "../core/shadowExecutor";
 import { setupOfflineListener } from "../core/offlineManager";
 import { offlineQueue } from "../store/offlineQueue";
 import { handleStream } from "../streaming/streamHandler";
+import { applyCorrelationId } from "./correlation";
+import { createMetricsCollector } from "./metricsCollector";
+import { applyTracing } from "./tracer";
+import { HealthChecker } from "./healthChecker";
+import { applyCSRF } from "../security/csrfProtector";
+import { CookieJar } from "../store/cookieJar";
 import { PriorityQueue } from "../resilience/priorityQueue";
 import { RateLimiter } from "../resilience/rateLimiter";
 import { CircuitBreaker } from "../resilience/circuitBreaker";
@@ -14,6 +20,7 @@ import { compose } from "./compose";
 import { createContext } from "./context";
 import { transportMiddleware } from "./transport";
 import { timeoutMiddleware } from "./timeout";
+import { SolvixBus } from "./bus";
 import { SolvixError } from "../errors";
 import { sleep } from "../utils/sleep";
 import {
@@ -37,6 +44,7 @@ import {
 } from "../store/inflight";
 import {
     getCache,
+    peekCache,
     setCache
 } from "../store/cache";
 
@@ -46,15 +54,34 @@ import { markTimeline } from "../utils/timeline";
 import { getNetworkDuration } from "../utils/retryAnalytics";
 import { buildProfile } from "../utils/profiler";
 import { runDevWarnings } from "../utils/devWarnings";
-import { SolvixBus } from "./bus";
 import { RequestGroup } from "./group";
 import { dependencyRegistry } from "./dependencyRegistry";
 import { buildSnapshot } from "../utils/snapshotBuilder";
 import { tokenOrchestrator } from "./tokenOrchestrator";
-import { getETag, setETag } from "../store/etagStore";
+import { getETag, setETag, clearETag } from "../store/etagStore";
 import { defaultTransport } from "../core/defaultTransport";
-import { sanitizeHeaders } from "../security/headerSanitizer";
+import { sanitizeRawHeaders } from "../security/headerSanitizer";
+import { trackDownloadProgress, trackUploadProgress } from "./progressReport";
 
+/**
+ * Create a Solvix HTTP client instance.
+ *
+ * @example
+ * ```ts
+ * const client = createClient({
+ *   baseURL: "https://api.example.com",
+ *   timeout: 5000,
+ *   retry: { retries: 3 },
+ *   logger: console
+ * });
+ *
+ * const res = await client.get("/users");
+ * console.log(res.data);
+ * ```
+ *
+ * All options are optional. Features are opt-in — nothing is enabled by default
+ * except basic HTTP functionality and security guards (CRLF protection, etc.).
+ */
 export function createClient(globalOptions: SolvixOptions = {}) {
 
     const priorityQueue = new PriorityQueue(
@@ -63,10 +90,23 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         globalOptions.queue?.strategy ?? "fifo"
     );
 
-    const middlewares: SolvixMiddleware[] = [
+    let middlewares: SolvixMiddleware[] = [
         timeoutMiddleware,
         transportMiddleware
     ];
+
+    let run = compose(middlewares);
+
+    // Proxy/TLS transport for Node.js (fire-and-forget init — resolves before first real request)
+    if (globalOptions.proxy || globalOptions.tls) {
+        import("../node/nodeTransport").then(({ createNodeTransport }) =>
+            createNodeTransport(globalOptions.tls, globalOptions.proxy)
+        ).then((transport) => {
+            if (transport) {
+                globalOptions.transport = transport;
+            }
+        }).catch(() => { /* undici not available — use default transport */ });
+    }
 
     const limiter = globalOptions.rateLimit
         ? new RateLimiter(
@@ -91,15 +131,57 @@ export function createClient(globalOptions: SolvixOptions = {}) {
         })
         : null;
 
-    const run = compose(middlewares);
+    // Metrics collector
+    const metricsCollector = createMetricsCollector(globalOptions.metrics);
+    if (globalOptions.metrics?.enabled) {
+        const mc = metricsCollector;
+        SolvixBus.on("request:start", mc.onStart!);
+        SolvixBus.on("request:complete", mc.onComplete!);
+        SolvixBus.on("request:error", mc.onError!);
+        SolvixBus.on("request:retry", mc.onRetry!);
+    }
+
+    // Health checker
+    const healthChecker = globalOptions.healthCheck?.enabled
+        ? new HealthChecker(globalOptions.healthCheck, (async (url: string, opts?: Record<string, any>) => {
+            // Use a lightweight request that bypasses most features
+            return request(url, {
+                ...opts,
+                method: "GET" as HttpMethod,
+                priority: 1,
+                // prevent the health check from showing up in user metrics
+            });
+        }))
+        : null;
+
+    if (healthChecker) {
+        healthChecker.start();
+    }
+
+    // Cookie jar
+    const cookieJar = globalOptions.cookieJar?.enabled
+        ? new CookieJar(globalOptions.cookieJar)
+        : null;
 
     if (
         typeof window !== "undefined" &&
         globalOptions.offline?.enabled
     ) {
+        offlineQueue.setMaxSize(globalOptions.offline.maxQueueSize ?? 100);
         setupOfflineListener();
     }
 
+    /**
+     * Execute an HTTP request through the full Solvix pipeline:
+     * security checks → query params → fingerprinting → dedup check → cache check →
+     * queue → middleware (timeout → transport) → response parsing → validation → caching → events.
+     *
+     * Prefer the typed convenience methods (`get`, `post`, etc.) for most use cases.
+     *
+     * @param url - Relative or absolute URL (relative resolves against baseURL).
+     * @param options - Per-request options that override global options.
+     * @returns A promise that resolves to a SolvixResponse with parsed `data`.
+     */
     async function request<T = unknown>(
         url: string,
         options: SolvixOptions = {}
@@ -190,10 +272,12 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
         // Apply query params BEFORE fingerprinting
         if (mergedOptions.params) {
-            resolvedUrl = buildQueryString(
-                resolvedUrl,
-                mergedOptions.params
-            );
+            resolvedUrl = mergedOptions.paramsSerializer
+                ? mergedOptions.paramsSerializer(mergedOptions.params)
+                : buildQueryString(
+                    resolvedUrl,
+                    mergedOptions.params
+                );
         }
 
         if (globalOptions.allowedOrigins) {
@@ -275,12 +359,18 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
         const priority = ctx.options.priority ?? DEFAULT_PRIORITY;
 
+        const needsFingerprint =
+            ctx.options.dedupe ||
+            ctx.options.cache ||
+            ctx.options.etag?.enabled;
+
         const fingerprint =
             await generateFingerprint(
                 ctx.options.fetch?.method ?? "GET",
                 ctx.url,
                 ctx.options.fetch,
-                ctx.options.fingerprint
+                ctx.options.fingerprint,
+                !needsFingerprint
             );
 
         const method = ctx.options.fetch?.method ?? "GET";
@@ -304,26 +394,17 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
         const task = async (): Promise<SolvixResponse<T>> => {
 
-            globalOptions.hooks?.onRequestStart?.(ctx);
-
-            SolvixBus.emit({
-                type: "request:start",
-                context: ctx,
-                timestamp: Date.now()
-            });
-
-            const signal = ctx.options.fetch?.signal ?? undefined;
-            if (signal?.aborted) {
-                markTimeline(ctx, "failed");
-
-                const error = new SolvixError({
-                    message: "Request aborted",
-                    isRetryable: false
+            /** Finalize a failed request: snapshot, bus event, hooks, and throw.
+             *  Caller must markTimeline("failed") and handle group/breaker first. */
+            const finalizeFailure = (error: SolvixError): never => {
+                ctx.options.logger?.error?.(`Request failed: ${error.message}`, {
+                    url: ctx.url,
+                    status: error.status,
+                    attempts: ctx.meta.attempt,
+                    retries: ctx.meta.retries,
+                    runtime: ctx.meta.runtime,
+                    correlationId: ctx.meta.correlationId
                 });
-
-                if (ctx.options.group instanceof RequestGroup) {
-                    ctx.options.group.markFailed();
-                }
 
                 if (ctx.options.id) {
                     dependencyRegistry.reject(ctx.options.id, error);
@@ -335,13 +416,18 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
                     ctx.meta.snapshot = {
                         ...buildSnapshot(ctx),
-                        error: { message: error.message }
+                        error: {
+                            message: error.message,
+                            ...(error.status !== undefined && { status: error.status })
+                        }
                     };
 
                     if (security.redactSnapshot) {
                         redactSnapshotData(ctx);
                     }
                 }
+
+                globalOptions.hooks?.onError?.(error, ctx);
 
                 SolvixBus.emit({
                     type: "request:error",
@@ -350,6 +436,33 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 });
 
                 throw error;
+            };
+
+            globalOptions.hooks?.onRequestStart?.(ctx);
+
+            SolvixBus.emit({
+                type: "request:start",
+                context: ctx,
+                timestamp: Date.now()
+            });
+
+            ctx.options.logger?.info?.("Request started", {
+                url: ctx.url,
+                method
+            });
+
+            const signal = ctx.options.fetch?.signal ?? undefined;
+            if (signal?.aborted) {
+                markTimeline(ctx, "failed");
+
+                if (ctx.options.group instanceof RequestGroup) {
+                    ctx.options.group.markFailed();
+                }
+
+                finalizeFailure(new SolvixError({
+                    message: "Request aborted",
+                    isRetryable: false
+                }));
             }
 
             const host = new URL(ctx.url).host;
@@ -359,40 +472,14 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 if (!breaker.canRequest(host)) {
                     markTimeline(ctx, "failed");
 
-                    const error = new SolvixError({
-                        message: "Circuit breaker is OPEN",
-                        isRetryable: false
-                    });
-
                     if (ctx.options.group instanceof RequestGroup) {
                         ctx.options.group.markFailed();
                     }
 
-                    if (ctx.options.id) {
-                        dependencyRegistry.reject(ctx.options.id, error);
-                    }
-
-                    if (ctx.options.snapshot?.enabled) {
-                        ctx.meta.endTime = Date.now();
-                        ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
-
-                        ctx.meta.snapshot = {
-                            ...buildSnapshot(ctx),
-                            error: { message: error.message }
-                        };
-
-                        if (security.redactSnapshot) {
-                            redactSnapshotData(ctx);
-                        }
-                    }
-
-                    SolvixBus.emit({
-                        type: "request:error",
-                        context: ctx,
-                        timestamp: Date.now()
-                    });
-
-                    throw error;
+                    finalizeFailure(new SolvixError({
+                        message: "Circuit breaker is OPEN",
+                        isRetryable: false
+                    }));
                 }
             }
 
@@ -402,22 +489,34 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 markTimeline(ctx, "rateLimitWaitEnd");
             }
 
+            // Correlation ID — set once per request
+            applyCorrelationId(ctx, globalOptions.correlation);
+
             const retryConfig = normalizeRetry(ctx.options.retry);
+            const fallbackURLs = ctx.options.fallbackURLs ?? [];
             let attempt = 0;
+            let fallbackIdx = 0;
 
             while (attempt <= retryConfig.retries) {
                 try {
                     ctx.meta.attempt = attempt;
+
+                    // SECURITY — Header Sanitization & Injection Protection (all methods)
+                    // Sanitize at the plain-object layer to avoid Fetch API quirks
+                    // where the Headers constructor silently drops forbidden headers
+                    // like `Cookie` or throws on CRLF before we can intercept.
+                    if (ctx.options.fetch?.headers) {
+                        const raw = ctx.options.fetch.headers as Record<string, string>;
+                        const sanitized = sanitizeRawHeaders(raw, security.blockInsecureHeaders);
+                        ctx.options.fetch = { ...ctx.options.fetch, headers: sanitized };
+                    }
 
                     if (ctx.options.body !== undefined) {
                         const headers = new Headers(
                             ctx.options.fetch?.headers
                         );
 
-                        // SECURITY - Header Sanitization & Injection Protection
-                        sanitizeHeaders(headers, security.blockInsecureHeaders);
-
-                        const builtBody = await buildRequestBody(
+                        let builtBody = await buildRequestBody(
                             ctx.options.body,
                             ctx.options.bodyType,
                             headers,
@@ -431,6 +530,14 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             security.maxBodySize
                         );
 
+                        // Upload progress tracking
+                        if (ctx.options.hooks?.onUploadProgress) {
+                            builtBody = trackUploadProgress(
+                                builtBody as BodyInit,
+                                ctx.options.hooks.onUploadProgress
+                            ) as typeof builtBody;
+                        }
+
                         ctx.options.fetch = {
                             ...ctx.options.fetch,
                             body: builtBody,
@@ -438,6 +545,29 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         };
                     }
 
+                    // Consolidate header mutations — single Headers object
+                    const reqHeaders = new Headers(ctx.options.fetch?.headers);
+
+                    // Distributed tracing — new spanId per attempt
+                    applyTracing(ctx, globalOptions.tracing, attempt, reqHeaders);
+
+                    // CSRF token injection (for state-changing methods)
+                    applyCSRF(ctx, globalOptions.csrf, reqHeaders);
+
+                    // Cookie jar — attach stored cookies
+                    if (cookieJar) {
+                        const jarHeaders = cookieJar.getRequestHeaders(ctx.url);
+                        if (Object.keys(jarHeaders).length > 0) {
+                            for (const [key, val] of Object.entries(jarHeaders)) {
+                                if (!reqHeaders.has(key.toLowerCase())) {
+                                    reqHeaders.set(key, val);
+                                }
+                            }
+                        }
+                    }
+
+                    // Apply consolidated headers (mutate in-place, no spread)
+                    (ctx.options.fetch as Record<string, any>).headers = reqHeaders;
                     markTimeline(ctx, "transportStart");
 
                     // ETag Conditional Header
@@ -459,20 +589,76 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                     }
                     await run(ctx);
 
+                    // Cookie jar — store cookies from response
+                    if (cookieJar && ctx.response) {
+                        cookieJar.setFromResponse(ctx.response);
+                    }
+
                     // SECURITY — Response Size Guard
-                    await checkResponseSize(
+                    const sizeChunks = await checkResponseSize(
                         ctx.response!,
                         security.maxResponseSize
                     );
+
+                    if (sizeChunks) {
+                        // Body was consumed by the size check — reconstruct
+                        // the Response so parseResponse can still read it.
+                        ctx.response = new Response(
+                            new Blob(sizeChunks as BlobPart[]),
+                            {
+                                status: ctx.response!.status,
+                                statusText: ctx.response!.statusText,
+                                headers: ctx.response!.headers
+                            }
+                        );
+                    }
+
+                    // Download progress tracking (wraps response body with a counting stream)
+                    if (ctx.options.hooks?.onDownloadProgress && ctx.response) {
+                        ctx.response = trackDownloadProgress(
+                            ctx.response,
+                            ctx.options.hooks.onDownloadProgress
+                        );
+                    }
+
+                    // Adaptive rate limiting from response headers
+                    if (limiter) {
+                        const remaining = ctx.response!.headers.get("X-RateLimit-Remaining");
+                        const resetVal = ctx.response!.headers.get("X-RateLimit-Reset");
+                        if (remaining !== null) {
+                            limiter.syncFromHeaders(
+                                parseInt(remaining, 10),
+                                resetVal !== null ? parseInt(resetVal, 10) : undefined
+                            );
+                        }
+
+                        // Also handle standard Retry-After for 429 responses
+                        const retryAfter = ctx.response!.headers.get("Retry-After");
+                        if (retryAfter !== null && ctx.response!.status === 429) {
+                            const seconds = parseInt(retryAfter, 10);
+                            if (!isNaN(seconds)) {
+                                // Schedule next refill after the server-requested delay
+                                limiter.syncFromHeaders(0, Math.ceil(Date.now() / 1000) + seconds);
+                            }
+                        }
+                    }
 
                     // Handle 304 Not Modified
                     if (
                         ctx.options.etag?.enabled &&
                         ctx.response?.status === 304
                     ) {
-                        const cached = getCache(fingerprint);
+                        // 304 means "not modified" — use cached data even if TTL expired.
+                        // Use peekCache (not getCache) because getCache deletes expired entries.
+                        const cached = peekCache(fingerprint);
 
                         if (cached) {
+                            // Renew TTL on 304 hit so the cache doesn't keep expiring
+                            const ttl = typeof ctx.options.cache === "boolean"
+                                ? 300000
+                                : (ctx.options.cache as { ttl: number })?.ttl ?? 300000;
+
+                            setCache(fingerprint, cached, ttl);
                             markTimeline(ctx, "etagHit");
 
                             if (breaker) {
@@ -481,6 +667,23 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
                             return cached as SolvixResponse<T>;
                         }
+
+                        // No cached data at all (ETag stored but cache was never written).
+                        // Clear the stale ETag so the next request re-fetches fresh,
+                        // and return 304 as a valid response instead of throwing.
+                        clearETag(fingerprint);
+                        markTimeline(ctx, "etagHit");
+
+                        if (breaker) {
+                            breaker.recordSuccess(host);
+                        }
+
+                        return {
+                            data: undefined as T,
+                            status: 304,
+                            headers: ctx.response!.headers,
+                            meta: ctx.meta
+                        } as SolvixResponse<T>;
                     }
                     markTimeline(ctx, "responseReceived");
 
@@ -552,40 +755,14 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             }
                         }
 
-                        // Dependency rejection only if truly failing
-                        if (ctx.options.id) {
-                            dependencyRegistry.reject(ctx.options.id, solvixError);
+                        // Try fallback URLs before final failure
+                        if (solvixError.isRetryable && fallbackIdx < fallbackURLs.length) {
+                            ctx.url = fallbackURLs[fallbackIdx++]!;
+                            attempt = 0;
+                            continue;
                         }
 
-                        // Snapshot finalization
-                        if (ctx.options.snapshot?.enabled) {
-                            ctx.meta.endTime = Date.now();
-                            ctx.meta.duration = ctx.meta.endTime - ctx.meta.startTime;
-
-                            ctx.meta.snapshot = {
-                                ...buildSnapshot(ctx),
-                                error: {
-                                    message: solvixError.message,
-                                    ...(solvixError.status !== undefined && {
-                                        status: solvixError.status
-                                    })
-                                }
-                            };
-
-                            if (security.redactSnapshot) {
-                                redactSnapshotData(ctx);
-                            }
-                        }
-
-                        globalOptions.hooks?.onError?.(solvixError, ctx);
-
-                        SolvixBus.emit({
-                            type: "request:error",
-                            context: ctx,
-                            timestamp: Date.now()
-                        });
-
-                        throw solvixError;
+                        finalizeFailure(solvixError);
                     }
 
                     attempt++;
@@ -597,6 +774,12 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                         type: "request:retry",
                         context: ctx,
                         timestamp: Date.now()
+                    });
+
+                    ctx.options.logger?.warn?.("Request retrying", {
+                        url: ctx.url,
+                        attempt,
+                        retries: ctx.meta.retries
                     });
 
                     const networkTime =
@@ -643,6 +826,18 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 markTimeline(ctx, "parseEnd");
             }
 
+            // Response schema validation
+            if (ctx.options.validateResponse) {
+                try {
+                    data = ctx.options.validateResponse(data);
+                } catch (err) {
+                    throw new SolvixError({
+                        message: `Response validation failed: ${err instanceof Error ? err.message : String(err)}`,
+                        isRetryable: false
+                    });
+                }
+            }
+
             ctx.meta.endTime = Date.now();
             ctx.meta.duration =
                 ctx.meta.endTime - ctx.meta.startTime;
@@ -670,14 +865,13 @@ export function createClient(globalOptions: SolvixOptions = {}) {
 
             if (
                 method === "GET" &&
-                ctx.options.cache &&
-                typeof ctx.options.cache !== "boolean"
+                ctx.options.cache
             ) {
-                setCache(
-                    fingerprint,
-                    response,
-                    ctx.options.cache.ttl
-                );
+                const ttl = typeof ctx.options.cache === "boolean"
+                    ? 300000  // default 5 min TTL for cache: true
+                    : ctx.options.cache.ttl;
+
+                setCache(fingerprint, response, ttl);
             }
 
             if (breaker) {
@@ -707,6 +901,13 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 timestamp: Date.now()
             });
 
+            ctx.options.logger?.info?.("Request completed", {
+                url: ctx.url,
+                status: ctx.response!.status,
+                duration: ctx.meta.duration,
+                runtime: ctx.meta.runtime
+            });
+
             if (
                 ctx.options.etag?.enabled &&
                 method === "GET"
@@ -720,10 +921,7 @@ export function createClient(globalOptions: SolvixOptions = {}) {
             }
 
             // Advanced Shadow Mode (Non-blocking)
-            if (
-                ctx.options.shadow?.enabled &&
-                typeof window !== "undefined"
-            ) {
+            if (ctx.options.shadow?.enabled) {
                 // Fire and forget
                 executeShadow(
                     ctx,
@@ -822,13 +1020,60 @@ export function createClient(globalOptions: SolvixOptions = {}) {
     }
 
     return {
+        /**
+         * Make an HTTP request with full control over method, headers, body, and all options.
+         * Prefer the typed convenience methods (`get`, `post`, etc.) for most use cases.
+         *
+         * @param url - Relative or absolute URL (relative resolves against baseURL).
+         * @param options - Per-request options that override global options.
+         * @returns A promise that resolves to a SolvixResponse with parsed data.
+         */
         request,
+        /** HTTP GET request. @see {@link request} for options. */
         get: methodFactory("GET"),
+        /** HTTP POST request. @see {@link request} for options. */
         post: methodFactory("POST"),
+        /** HTTP PUT request. @see {@link request} for options. */
         put: methodFactory("PUT"),
+        /** HTTP PATCH request. @see {@link request} for options. */
         patch: methodFactory("PATCH"),
+        /** HTTP DELETE request. @see {@link request} for options. */
         delete: methodFactory("DELETE"),
+        /** HTTP HEAD request. @see {@link request} for options. */
         head: methodFactory("HEAD"),
-        options: methodFactory("OPTIONS")
+        /** HTTP OPTIONS request. @see {@link request} for options. */
+        options: methodFactory("OPTIONS"),
+        /**
+         * Returns aggregated metrics snapshot, or null if metrics are disabled.
+         * Includes request counts, success/failure breakdown, and duration histogram.
+         */
+        metrics: () => metricsCollector.getMetrics(),
+        /**
+         * Health checker controller. Null if health checks are disabled.
+         * Use `.isHealthy()` to check backend status, `.stop()` to stop the interval.
+         */
+        healthCheck: healthChecker
+            ? { isHealthy: () => healthChecker.healthy, stop: () => healthChecker.stop() }
+            : null,
+        /**
+         * Register a custom middleware function in the request pipeline.
+         * The middleware runs before the transport and can modify the request or response.
+         *
+         * @param fn - Middleware function: `(ctx, next) => Promise<void>`.
+         *             Call `await next()` to pass control to the next layer.
+         *
+         * @example
+         * ```ts
+         * client.use(async (ctx, next) => {
+         *   console.log("→", ctx.url);
+         *   await next();
+         *   console.log("←", ctx.response?.status);
+         * });
+         * ```
+         */
+        use: (fn: SolvixMiddleware) => {
+            middlewares.splice(middlewares.length - 1, 0, fn);
+            run = compose(middlewares);
+        }
     };
 }

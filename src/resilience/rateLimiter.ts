@@ -54,4 +54,20 @@ export class RateLimiter {
             });
         }
     }
+
+    /** Sync the token count from a server-provided `X-RateLimit-Remaining` value.
+     *  This keeps the client-side bucket aligned with the server's actual state. */
+    syncFromHeaders(remaining: number, resetAt?: number) {
+        this.tokens = Math.min(this.capacity, remaining);
+
+        if (resetAt !== undefined) {
+            const serverResetMs = resetAt * 1000;
+            const localTimeMs = Date.now();
+            const waitMs = Math.max(0, serverResetMs - localTimeMs);
+
+            // If the server says the bucket resets far in the future,
+            // advance lastRefill so the next refill happens after reset.
+            this.lastRefill = localTimeMs + waitMs;
+        }
+    }
 }
