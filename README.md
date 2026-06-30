@@ -268,3 +268,20 @@ MIT
 We welcome feature proposals, bug reports, security reviews, and performance improvements.
 
 Solvix transforms API communication into a reliable, observable, secure, and orchestrated execution system. It is not just a client — it is infrastructure.
+
+## ❤️ Sponsor
+
+If Solvix has helped you build better applications, please consider supporting its development.
+
+Your sponsorship helps fund:
+
+- 🚀 New features
+- 🐛 Bug fixes
+- 📚 Documentation
+- ⚡ Performance improvements
+- 🧪 Testing & CI
+- 🔒 Long-term maintenance
+
+👉 **Sponsor Solvix:** [Buy Me a Coffee](https://buymeacoffee.com/solvix)
+
+Every contribution helps keep Solvix free and open source.
