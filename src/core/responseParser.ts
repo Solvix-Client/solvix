@@ -1,7 +1,10 @@
+import type { SerializationOptions } from "../types";
+
 export async function parseResponse(
     response: Response,
     responseType: string | undefined,
-    transform?: (response: Response) => Promise<any>
+    transform?: (response: Response) => Promise<any>,
+    serialization?: { protobuf?: SerializationOptions; msgpack?: SerializationOptions }
 ) {
 
     if (transform) {
@@ -34,6 +37,28 @@ export async function parseResponse(
 
     if (responseType === "stream") {
         return response.body;
+    }
+
+    if (responseType === "protobuf") {
+        const codec = serialization?.protobuf;
+        if (!codec) {
+            throw new Error(
+                "responseType \"protobuf\" requires a serialization.protobuf decoder"
+            );
+        }
+        const buffer = await response.arrayBuffer();
+        return codec.decoder(new Uint8Array(buffer));
+    }
+
+    if (responseType === "msgpack") {
+        const codec = serialization?.msgpack;
+        if (!codec) {
+            throw new Error(
+                "responseType \"msgpack\" requires a serialization.msgpack decoder"
+            );
+        }
+        const buffer = await response.arrayBuffer();
+        return codec.decoder(new Uint8Array(buffer));
     }
 
     return response.json();

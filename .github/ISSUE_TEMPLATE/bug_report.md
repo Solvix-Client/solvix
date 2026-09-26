@@ -12,7 +12,7 @@ A clear and concise description of what the bug is.
 **Minimal reproduction**
 
 ```ts
-import { createClient } from "@adityadev13/solvix";
+import { createClient } from "@solvix-client/client";
 
 // Code that reproduces the issue
 const client = createClient({ baseURL: "https://api.example.com" });

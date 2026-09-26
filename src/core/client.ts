@@ -521,7 +521,8 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                             ctx.options.bodyType,
                             headers,
                             ctx.options.transformRequest,
-                            ctx.options.avoidPreflight
+                            ctx.options.avoidPreflight,
+                            ctx.options.serialization
                         );
 
                         // SECURITY — Body Size Guard
@@ -821,7 +822,8 @@ export function createClient(globalOptions: SolvixOptions = {}) {
                 data = await parseResponse(
                     ctx.response!,
                     ctx.options.responseType,
-                    ctx.options.transformResponse
+                    ctx.options.transformResponse,
+                    ctx.options.serialization
                 );
                 markTimeline(ctx, "parseEnd");
             }
