@@ -7,7 +7,9 @@ export type BodyType =
     | "text"
     | "blob"
     | "arrayBuffer"
-    | "raw";
+    | "raw"
+    | "protobuf"
+    | "msgpack";
 
 export type ResponseType =
     | "json"
@@ -16,7 +18,9 @@ export type ResponseType =
     | "arrayBuffer"
     | "formData"
     | "stream"
-    | "raw";
+    | "raw"
+    | "protobuf"
+    | "msgpack";
 
 export type HttpMethod =
     | "GET"
@@ -354,6 +358,181 @@ export interface StreamOptions {
     parseJsonLines?: boolean;
 }
 
+/** Custom codec for binary serialization (protobuf, msgpack). */
+export interface SerializationOptions {
+    /** Encode data to binary format. */
+    encoder: (data: unknown) => ArrayBuffer | Uint8Array;
+    /** Decode binary data back to a JS value. */
+    decoder: (buffer: ArrayBuffer | Uint8Array) => unknown;
+    /** Content-Type header. Defaults: "application/protobuf" or "application/msgpack". */
+    contentType?: string;
+}
+
+/** Load balance strategy: built-in name or custom selector function. */
+export type LoadBalanceStrategy =
+    | "round-robin"
+    | "random"
+    | "weighted"
+    | "health"
+    | ((backends: BackendState[]) => BackendState);
+
+/** Runtime state for a single backend in the load balancer. */
+export interface BackendState {
+    url: string;
+    weight: number;
+    healthy: boolean;
+    consecutiveFailures: number;
+    lastChecked: number;
+    /** Rolling average response time in ms. Updated after each request. */
+    latency: number;
+}
+
+/** Configuration for a single backend server. */
+export interface BackendConfig {
+    url: string;
+    /** Weight for weighted strategy. Default: 1 */
+    weight?: number;
+    /** Per-backend health check configuration. */
+    healthCheck?: {
+        /** Health endpoint path (appended to backend URL). Default: "/health" */
+        endpoint?: string;
+        /** Check interval in ms. Default: 30000 */
+        interval?: number;
+        /** Request timeout in ms. Default: 5000 */
+        timeout?: number;
+        /** Consecutive failures before marking unhealthy. Default: 3 */
+        failureThreshold?: number;
+        /** Expected HTTP status code. Default: 200 */
+        expectedStatus?: number;
+    };
+}
+
+/** Options for `createLoadBalancer()`. */
+export interface LoadBalancerOptions {
+    /** Array of backend server configurations. */
+    backends: BackendConfig[];
+    /** Load balancing strategy. Default: "round-robin" */
+    strategy?: LoadBalanceStrategy;
+    /** Failover behavior when a backend is unhealthy. */
+    failover?: {
+        /** Retry on another backend after failure. Default: true */
+        enabled?: boolean;
+        /** Max failover attempts. Default: backends.length - 1 */
+        maxRetries?: number;
+    };
+    /** Called when a backend health status changes. */
+    onBackendChange?: (backend: string, healthy: boolean) => void;
+}
+
+// ─── GraphQL ────────────────────────────────────────────────────────────────
+
+/** Options for `createGraphQLClient()`. */
+export interface GraphQLOptions {
+    /** GraphQL endpoint URL. Default: baseURL + "/graphql" */
+    endpoint?: string;
+    /** Persisted query (APQ) configuration. */
+    persistedQueries?: PersistedQueryOptions;
+    /** Request batching configuration. */
+    batching?: BatchingOptions;
+    /** Entity-level cache normalization. */
+    cacheNormalization?: CacheNormalizationOptions;
+    /** Default headers for all GraphQL operations. */
+    headers?: Record<string, string>;
+    /** Throw a GraphQLClientError when the response contains errors. Default: false */
+    throwOnError?: boolean;
+    /** Default HTTP method for all operations. Default: "POST" */
+    defaultMethod?: "GET" | "POST";
+}
+
+/** Apollo-style Automatic Persisted Queries (APQ). */
+export interface PersistedQueryOptions {
+    enabled?: boolean;
+    /** Hash algorithm. Default: "sha256" */
+    hashAlgorithm?: string;
+}
+
+/** Batch multiple GraphQL operations into a single HTTP request. */
+export interface BatchingOptions {
+    enabled?: boolean;
+    /** Max operations per batch. Default: 10 */
+    maxBatchSize?: number;
+    /** Time window (ms) to collect operations before sending. Default: 10 */
+    batchInterval?: number;
+}
+
+/** Entity-level cache normalization for GraphQL responses. */
+export interface CacheNormalizationOptions {
+    enabled?: boolean;
+    /** Fields used to generate entity cache keys. Default: ["__typename", "id"] */
+    keyFields?: string[];
+    /** Custom entity key generator. Overrides keyFields. */
+    keyFn?: (entity: Record<string, any>) => string | null;
+    /** TTL in ms for normalized cache entries. Default: 300000 (5 min) */
+    ttl?: number;
+}
+
+/** Per-operation options for GraphQL queries/mutations. */
+export interface GraphQLOperationOptions {
+    /** GraphQL variables. */
+    variables?: Record<string, any>;
+    /** Operation name (required when document contains multiple operations). */
+    operationName?: string;
+    /** Apollo-style extensions (e.g., persisted query hash). */
+    extensions?: Record<string, any>;
+    /** Override HTTP method for this operation. */
+    method?: "GET" | "POST";
+    /** Override underlying Solvix options for this operation. */
+    context?: Partial<SolvixOptions>;
+}
+
+/** Standard GraphQL response envelope. */
+export interface GraphQLResponse<T = any> {
+    data?: T;
+    errors?: GraphQLError[];
+    extensions?: Record<string, any>;
+}
+
+/** A single GraphQL error. */
+export interface GraphQLError {
+    message: string;
+    locations?: Array<{ line: number; column: number }>;
+    path?: Array<string | number>;
+    extensions?: Record<string, any>;
+}
+
+/** Transport adapter interface for GraphQL subscriptions. */
+export interface GraphQLSubscriptionTransport {
+    subscribe(url: string, payload: any): AsyncIterable<any>;
+    close(): void;
+}
+
+/** A GraphQL client returned by `createGraphQLClient()`. */
+export interface GraphQLClient {
+    /** Execute a GraphQL query. Default method: GET */
+    query<T = any>(
+        document: string,
+        options?: GraphQLOperationOptions
+    ): Promise<GraphQLResponse<T>>;
+    /** Execute a GraphQL mutation. Always uses POST. */
+    mutate<T = any>(
+        document: string,
+        options?: GraphQLOperationOptions
+    ): Promise<GraphQLResponse<T>>;
+    /** Send a batch of operations in a single HTTP request. */
+    batch(
+        operations: Array<{ document: string; options?: GraphQLOperationOptions }>
+    ): Promise<GraphQLResponse[]>;
+    /** Subscribe to a GraphQL subscription via a transport adapter. */
+    subscribe<T = any>(
+        document: string,
+        options: GraphQLOperationOptions & { transport: GraphQLSubscriptionTransport }
+    ): AsyncIterable<GraphQLResponse<T>>;
+    /** Invalidate cached entities matching a predicate. */
+    evict(predicate: (key: string) => boolean): void;
+    /** Clear all normalized cache. */
+    clearCache(): void;
+}
+
 /**
  * All options accepted by `createClient()` and per-request.
  *
@@ -498,6 +677,11 @@ export interface SolvixOptions {
     proxy?: ProxyOptions;
     /** Custom query parameter serializer. Overrides the default URLSearchParams-based serializer. */
     paramsSerializer?: (params: Record<string, any>) => string;
+    /** Custom serialization codec for protobuf/msgpack bodyType and responseType. */
+    serialization?: {
+        protobuf?: SerializationOptions;
+        msgpack?: SerializationOptions;
+    };
     /** @internal */
     __tokenRefreshAttempted?: boolean;
     /** @internal */

@@ -2,6 +2,83 @@
 
 ---
 
+## v1.1.0 (2026-06-29) — GraphQL, Load Balancing & Binary Serialization
+
+### New Features (3 major)
+
+#### GraphQL Client (`createGraphQLClient`)
+- **Query & Mutation** — `graphql.query()` and `graphql.mutate()` with full type inference
+- **Request Batching** — collect multiple operations into a single HTTP request with configurable interval and max batch size
+- **Automatic Persisted Queries (APQ)** — SHA-256 hash-based query deduplication, server-side caching
+- **Entity-level Cache Normalization** — `__typename:id` key extraction with TTL-based auto-eviction and manual `evict()`/`clearCache()`
+- **Subscription Transport Adapters** — pluggable architecture supporting HTTP/SSE (`createHTTPTransport`) and WebSocket (`createWSTransport`) with `graphql-ws` protocol, heartbeat, reconnect
+- **GraphQL Error Handling** — `GraphQLClientError` with structured `graphqlErrors` array, optional `throwOnError` mode
+- Composition architecture: all HTTP concerns (retry, circuit breaker, rate limiting, metrics, tracing, auth) inherited from the underlying Solvix client
+
+#### Client-side Load Balancing (`createLoadBalancer`)
+- **Drop-in transport** — `createLoadBalancer()` returns a `SolvixTransport`, use via `createClient({ transport })`
+- **Built-in strategies** — `round-robin`, `random`, `weighted`, `health`
+- **Custom strategy functions** — `(backends: BackendState[]) => BackendState` with access to `latency`, `healthy`, `weight`, `consecutiveFailures`
+- **Per-backend health checking** — configurable endpoint, interval, timeout, failure threshold
+- **Transparent failover** — automatically routes to healthy backends on 5xx or connection errors
+- **Latency tracking** — exponential moving average updated after each request
+- **URL rewriting** — preserves paths, query params, and fragments across backends
+
+#### Protobuf / MessagePack Serialization
+- **Extended `BodyType`** — `"protobuf"` and `"msgpack"` added to the union
+- **Extended `ResponseType`** — `"protobuf"` and `"msgpack"` added to the union
+- **`SerializationOptions`** — user-provided `encoder`/`decoder` functions, zero bundled dependencies
+- **Codec helpers** — `createProtobufCodec()` and `createMsgpackCodec()` with sensible defaults
+- **Custom Content-Type** — override default `application/protobuf` or `application/msgpack` headers
+
+### New Exports
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `createGraphQLClient` | function | Create a GraphQL client wrapping an existing Solvix client |
+| `createHTTPTransport` | function | HTTP/SSE transport adapter for GraphQL subscriptions |
+| `createWSTransport` | function | WebSocket transport adapter for GraphQL subscriptions |
+| `createLoadBalancer` | function | Create a load-balancing transport |
+| `createProtobufCodec` | function | Helper to create a protobuf serialization codec |
+| `createMsgpackCodec` | function | Helper to create a MessagePack serialization codec |
+| `GraphQLOptions` | interface | Options for `createGraphQLClient()` |
+| `GraphQLOperationOptions` | interface | Per-operation options for queries/mutations |
+| `GraphQLResponse` | interface | Standard GraphQL response envelope |
+| `GraphQLError` | interface | A single GraphQL error |
+| `GraphQLClient` | interface | The GraphQL client interface |
+| `GraphQLSubscriptionTransport` | interface | Transport adapter interface for subscriptions |
+| `GraphQLClientError` | class | Error thrown when `throwOnError` is enabled |
+| `LoadBalancerOptions` | interface | Options for `createLoadBalancer()` |
+| `BackendConfig` | interface | Configuration for a single backend server |
+| `BackendState` | interface | Runtime state of a backend (latency, health, etc.) |
+| `LoadBalanceStrategy` | type | Built-in strategy name or custom function |
+| `SerializationOptions` | interface | Custom codec for binary serialization |
+
+### New Types in `SolvixOptions`
+
+```typescript
+serialization?: {
+  protobuf?: SerializationOptions;
+  msgpack?: SerializationOptions;
+};
+```
+
+### Tests
+
+- 37 new tests across 3 files (`graphql.spec.ts`, `loadBalancer.spec.ts`, `serialization.spec.ts`)
+- Total: **208 tests passing** across 32 test files
+- Zero breaking changes — all features are opt-in
+
+### Bundle
+
+| Output | Size |
+|--------|------|
+| ESM (`dist/index.js`) | 33.05 KB |
+| CJS (`dist/index.cjs`) | 33.96 KB |
+| DTS (`dist/index.d.ts`) | 34.28 KB |
+
+---
+
 ## v1.0.0 (2026-06-23) — Stable Release
 
 ### What's New Since Beta

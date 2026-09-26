@@ -11,7 +11,7 @@ import type {
  *
  * @example
  * ```ts
- * import { RequestGroup, createClient } from "@adityadev13/solvix";
+ * import { RequestGroup, createClient } from "@solvix/client";
  *
  * const group = RequestGroup.create("search");
  * const client = createClient({ baseURL: "https://api.example.com" });

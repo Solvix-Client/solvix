@@ -1,4 +1,10 @@
 export { createClient } from "./core/client";
 export { RequestGroup } from "./core/group";
 export { SolvixBus } from "./core/bus";
+export { createProtobufCodec } from "./serialization/protobuf";
+export { createMsgpackCodec } from "./serialization/msgpack";
+export { createLoadBalancer } from "./resilience/loadBalancer";
+export { createGraphQLClient } from "./graphql/client";
+export { createHTTPTransport } from "./graphql/transports/http";
+export { createWSTransport } from "./graphql/transports/websocket";
 export * from "./types";

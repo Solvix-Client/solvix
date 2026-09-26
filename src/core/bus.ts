@@ -18,7 +18,7 @@ type Listener = (event: SolvixEvent) => void;
  *
  * @example
  * ```ts
- * import { SolvixBus } from "@adityadev13/solvix";
+ * import { SolvixBus } from "@solvix/client";
  *
  * SolvixBus.on("request:complete", (event) => {
  *   console.log(`[${event.context.meta.correlationId}] ${event.context.url}`);

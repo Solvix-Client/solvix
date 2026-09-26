@@ -13,20 +13,20 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/npm/v/@adityadev13/solvix?style=flat&color=2563EB" alt="npm version" />
-  <img src="https://img.shields.io/npm/l/@adityadev13/solvix?style=flat&color=14B8A6" alt="license" />
-  <img src="https://img.shields.io/npm/types/@adityadev13/solvix?style=flat&color=9333EA" alt="typescript support" />
+  <img src="https://img.shields.io/npm/v/@solvix/client?style=flat&color=2563EB" alt="npm version" />
+  <img src="https://img.shields.io/npm/l/@solvix/client?style=flat&color=14B8A6" alt="license" />
+  <img src="https://img.shields.io/npm/types/@solvix/client?style=flat&color=9333EA" alt="typescript support" />
   <img src="https://img.shields.io/badge/node-%3E%3D18.0.0-0EA5E9?style=flat" alt="node version" />
   <img src="https://img.shields.io/badge/security-enterprise--grade-DC2626?style=flat" alt="security" />
   <img src="https://img.shields.io/badge/Bundle-33KB%20ESM-16A34A?style=flat" alt="bundle size" />
-  <img src="https://img.shields.io/badge/Tests-171%20passing-9333EA?style=flat" alt="tests" />
+  <img src="https://img.shields.io/badge/Tests-208%20passing-9333EA?style=flat" alt="tests" />
 </p>
 
 ---
 
 **Solvix is an HTTP orchestration engine** — not just a client. It transforms simple API requests into secure, observable, resilient, and fully controlled execution pipelines.
 
-Unlike traditional HTTP clients (Axios, Got, SuperAgent) that leave resilience, security, and observability to the developer, Solvix bakes ~50 features into a single 33 KB package.
+Unlike traditional HTTP clients (Axios, Got, SuperAgent) that leave resilience, security, and observability to the developer, Solvix bakes **~53 features** into a single 33 KB package.
 
 ---
 
@@ -58,6 +58,9 @@ Unlike traditional HTTP clients (Axios, Got, SuperAgent) that leave resilience, 
 | Custom Middleware | ✅ `client.use()` | ✅ Interceptors | ❌ |
 | SSL/TLS Customization | ✅ (via undici) | ✅ | ✅ |
 | HTTP Proxy | ✅ (via undici) | ✅ | ✅ |
+| GraphQL Client (query, mutation, batch, APQ, subscriptions) | ✅ **Built-in** | ❌ | ❌ |
+| Client-side Load Balancing (round-robin, weighted, custom strategies) | ✅ **Built-in** | ❌ | ❌ |
+| Protobuf / MessagePack Serialization | ✅ **Built-in** | ❌ | ❌ |
 | **Bundle Size** | **33 KB** | ~52 KB | ~42 KB |
 
 ---
@@ -65,11 +68,11 @@ Unlike traditional HTTP clients (Axios, Got, SuperAgent) that leave resilience, 
 ## Quick Start
 
 ```bash
-npm install @adityadev13/solvix
+npm install @solvix/client
 ```
 
 ```ts
-import { createClient } from "@adityadev13/solvix";
+import { createClient } from "@solvix/client";
 
 const api = createClient({ baseURL: "https://api.example.com" });
 
@@ -139,7 +142,7 @@ const api = createClient({
 });
 
 // Events — subscribe globally
-import { SolvixBus } from "@adityadev13/solvix";
+import { SolvixBus } from "@solvix/client";
 SolvixBus.on("request:complete", (e) => {
   console.log(`${e.context.url} → ${e.context.response?.status}`);
 });
@@ -210,6 +213,130 @@ api.use(async (ctx, next) => {
 
 Custom middleware runs in the request pipeline before the transport layer. Compose multiple middleware in order (onion model).
 
+### 🌐 GraphQL Client
+
+```ts
+import { createClient, createGraphQLClient } from "@solvix/client";
+
+const client = createClient({ baseURL: "https://api.example.com" });
+const graphql = createGraphQLClient(client, {
+  endpoint: "/graphql",
+  cacheNormalization: { enabled: true, ttl: 300000 },
+  persistedQueries: { enabled: true },
+});
+
+// Query (default: GET for better caching)
+const { data } = await graphql.query(`{ users { id name } }`);
+
+// Mutation (always POST)
+const { data: created } = await graphql.mutate(
+  `mutation CreateUser($input: UserInput!) { createUser(input: $input) { id } }`,
+  { variables: { input: { name: "Alice" } } }
+);
+
+// Batch multiple operations into a single HTTP request
+const results = await graphql.batch([
+  { document: "{ users { id } }", options: { variables: { limit: 10 } } },
+  { document: "{ posts { id title } }" },
+]);
+
+// Subscriptions via transport adapters (SSE or WebSocket)
+import { createHTTPTransport, createWSTransport } from "@solvix/client";
+
+// HTTP/SSE subscription
+for await (const event of graphql.subscribe("{ updates { id } }", {
+  transport: createHTTPTransport(),
+})) {
+  console.log(event);
+}
+
+// WebSocket subscription
+for await (const event of graphql.subscribe("subscription { onMessage { text } }", {
+  transport: createWSTransport({ url: "wss://api.example.com/graphql" }),
+})) {
+  console.log(event);
+}
+```
+
+- Query, mutation, batch, and subscribe operations
+- Apollo-style Automatic Persisted Queries (APQ) with SHA-256 hashing
+- Entity-level cache normalization (`__typename:id` keys with TTL)
+- Subscription transport adapters: HTTP/SSE and WebSocket (`graphql-ws` protocol)
+- All HTTP concerns (retry, circuit breaker, metrics, auth) inherited from the underlying client
+
+### ⚖️ Client-side Load Balancing
+
+```ts
+import { createClient, createLoadBalancer } from "@solvix/client";
+
+const transport = createLoadBalancer({
+  backends: [
+    { url: "https://api-1.example.com", weight: 3 },
+    { url: "https://api-2.example.com", weight: 2 },
+    { url: "https://api-3.example.com", weight: 1, healthCheck: { endpoint: "/healthz" } },
+  ],
+  strategy: "weighted",
+  onBackendChange: (url, healthy) => console.log(url, healthy ? "UP" : "DOWN"),
+});
+
+const api = createClient({ transport });
+// All requests automatically distributed across backends
+```
+
+Custom strategies for full control:
+
+```ts
+// Least-latency strategy
+const transport = createLoadBalancer({
+  backends: [
+    { url: "https://api-1.example.com" },
+    { url: "https://api-2.example.com" },
+  ],
+  strategy: (backends) => backends.reduce((best, b) => b.latency < best.latency ? b : best),
+});
+```
+
+- Built-in strategies: `round-robin`, `random`, `weighted`, `health`
+- Custom strategy functions with access to `latency`, `healthy`, `weight`, `consecutiveFailures`
+- Per-backend health checking with configurable thresholds
+- Transparent failover — automatically routes to healthy backends
+- URL rewriting preserves paths and query params
+
+### 📡 Binary Serialization (Protobuf / MessagePack)
+
+```ts
+import { createClient, createMsgpackCodec } from "@solvix/client";
+import { encode, decode } from "@msgpack/msgpack";
+
+const api = createClient({
+  serialization: {
+    msgpack: createMsgpackCodec({
+      encoder: (data) => encode(data) as Uint8Array,
+      decoder: (buffer) => decode(new Uint8Array(buffer)),
+    }),
+  },
+});
+
+// Send and receive MessagePack
+const res = await api.post("/data", {
+  body: { name: "test", values: [1, 2, 3] },
+  bodyType: "msgpack",
+  responseType: "msgpack",
+});
+
+// Protobuf works the same way
+import { createProtobufCodec } from "@solvix/client";
+const protoCodec = createProtobufCodec({
+  encode: (data) => MyMessage.encode(MyMessage.fromObject(data)).finish(),
+  decode: (buf) => MyMessage.decode(new Uint8Array(buf)),
+});
+```
+
+- Zero bundled dependencies — user provides encoder/decoder functions
+- `createProtobufCodec()` and `createMsgpackCodec()` helpers with sensible defaults
+- Custom Content-Type headers supported
+- Works with any serialization library (protobufjs, @msgpack/msgpack, etc.)
+
 ---
 
 ## Architecture
@@ -249,10 +376,10 @@ For full documentation, API reference, and advanced guides:
 ## Installation
 
 ```bash
-npm install @adityadev13/solvix
-pnpm add @adityadev13/solvix
-yarn add @adityadev13/solvix
-bun add @adityadev13/solvix
+npm install @solvix/client
+pnpm add @solvix/client
+yarn add @solvix/client
+bun add @solvix/client
 ```
 
 ---

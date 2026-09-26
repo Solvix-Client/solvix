@@ -1,9 +1,12 @@
+import type { SerializationOptions } from "../types";
+
 export async function buildRequestBody(
     body: unknown,
     bodyType: string | undefined,
     headers: Headers,
     transform?: (body: unknown, headers: Headers) => any,
-    avoidPreflight?: boolean
+    avoidPreflight?: boolean,
+    serialization?: { protobuf?: SerializationOptions; msgpack?: SerializationOptions }
 ) {
 
     if (avoidPreflight) {
@@ -68,6 +71,28 @@ export async function buildRequestBody(
 
     if (bodyType === "arrayBuffer") {
         return body;
+    }
+
+    if (bodyType === "protobuf") {
+        const codec = serialization?.protobuf;
+        if (!codec) {
+            throw new Error(
+                "bodyType \"protobuf\" requires a serialization.protobuf encoder"
+            );
+        }
+        headers.set("Content-Type", codec.contentType ?? "application/protobuf");
+        return codec.encoder(body);
+    }
+
+    if (bodyType === "msgpack") {
+        const codec = serialization?.msgpack;
+        if (!codec) {
+            throw new Error(
+                "bodyType \"msgpack\" requires a serialization.msgpack encoder"
+            );
+        }
+        headers.set("Content-Type", codec.contentType ?? "application/msgpack");
+        return codec.encoder(body);
     }
 
     return body;
